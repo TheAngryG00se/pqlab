@@ -1,0 +1,6 @@
+build/
+/results/*
+!/results/final/
+compile_commands.json
+.cache/
+*.key
