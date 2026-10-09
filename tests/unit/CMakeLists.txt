@@ -5,5 +5,6 @@ target_compile_definitions(pq_unit_tests PRIVATE PQ_KAT_DIR="${PROJECT_SOURCE_DI
 
 add_subdirectory(core)
 add_subdirectory(hash)
+add_subdirectory(mlkem)
 
 gtest_discover_tests(pq_unit_tests DISCOVERY_TIMEOUT 60)
