@@ -19,9 +19,13 @@ include(cmake/warnings.cmake)
 include(cmake/sanitizers.cmake)
 include(cmake/tools.cmake)
 
-# Public interfaces (include/pq). The core helpers are header-only for now.
-add_library(pq_headers INTERFACE)
-target_include_directories(pq_headers INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+add_library(pqlab STATIC)
+target_include_directories(pqlab
+  PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
+  PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(pqlab PRIVATE pq_warnings)
+
+add_subdirectory(src)
 
 if(PQ_BUILD_TESTS)
   enable_testing()
