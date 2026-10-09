@@ -1,1 +1,1 @@
-target_sources(pqlab PRIVATE ntt.cpp)
+target_sources(pqlab PRIVATE ntt.cpp sampling.cpp)
