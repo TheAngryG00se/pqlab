@@ -5,6 +5,7 @@
 #include <cstdint>
 
 #include "kem/mlkem/params.hpp"
+#include "kem/mlkem/reduce.hpp"
 #include "pq/secure_bytes.hpp"
 
 namespace pq::mlkem::detail {
@@ -24,6 +25,19 @@ struct Poly {
   const uint16_t& operator[](size_t i) const noexcept { return c[i]; }
   bool operator==(const Poly& other) const = default;
 };
+
+// Coefficient-wise arithmetic (FIPS 203, Section 2.4.5).
+inline void poly_add(Poly& r, const Poly& a, const Poly& b) noexcept {
+  for (size_t i = 0; i < kN; ++i) {
+    r[i] = add_mod(a[i], b[i]);
+  }
+}
+
+inline void poly_sub(Poly& r, const Poly& a, const Poly& b) noexcept {
+  for (size_t i = 0; i < kN; ++i) {
+    r[i] = sub_mod(a[i], b[i]);
+  }
+}
 
 template <size_t K>
 using PolyVec = std::array<Poly, K>;
