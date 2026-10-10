@@ -72,6 +72,47 @@ std::string read_file(const std::filesystem::path& path) {
   return out;
 }
 
+SecureBytes read_secret_file(const std::filesystem::path& path) {
+  constexpr off_t kMaxSecretFile = 1 << 20;
+  Fd f(::open(path.c_str(), O_RDONLY | O_CLOEXEC));
+  if (f.fd < 0) {
+    fail("cannot open", path);
+  }
+  struct stat st{};
+  if (::fstat(f.fd, &st) != 0) {
+    fail("cannot stat", path);
+  }
+  if (st.st_size > kMaxSecretFile) {
+    throw Error("secret file too large '" + path.string() + "'");
+  }
+  SecureBytes out(static_cast<size_t>(st.st_size));
+  size_t done = 0;
+  while (done < out.size()) {
+    const ssize_t n = ::read(f.fd, out.data() + done, out.size() - done);
+    if (n < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      fail("cannot read", path);
+    }
+    if (n == 0) {
+      throw Error("secret file shrank while reading '" + path.string() + "'");
+    }
+    done += static_cast<size_t>(n);
+  }
+  return out;
+}
+
+void fsync_file(const std::filesystem::path& path) {
+  Fd f(::open(path.c_str(), O_RDONLY | O_CLOEXEC));
+  if (f.fd < 0) {
+    fail("cannot open", path);
+  }
+  if (::fsync(f.fd) != 0) {
+    fail("cannot sync", path);
+  }
+}
+
 void write_file_atomic(const std::filesystem::path& path, std::string_view content) {
   const std::filesystem::path tmp = path.string() + ".tmp";
   ::unlink(tmp.c_str());  // a leftover of a crashed run

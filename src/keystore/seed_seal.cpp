@@ -47,6 +47,9 @@ std::optional<SecureBytes> unseal_seed(const KeyRecord& rec, ByteView password, 
     throw Error("key has no sealed seed");
   }
   const SealedSeed& s = *rec.sealed;
+  if (s.kdf_iterations > kMaxKdfIterations) {
+    throw Error("key record asks for an unreasonable number of KDF iterations");
+  }
   if (s.aead != aead.name()) {
     throw Error("key was sealed with a different AEAD");
   }

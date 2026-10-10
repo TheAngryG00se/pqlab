@@ -14,6 +14,8 @@
 namespace pq::keystore {
 
 inline constexpr uint32_t kDefaultKdfIterations = 600000;
+// A record asking for more is refused, so that a crafted file cannot hang the process.
+inline constexpr uint32_t kMaxKdfIterations = 100000000;
 
 // Throws pq::Error for an empty password, zero iterations or an AEAD whose key is not
 // 32 bytes. Draws a fresh salt and nonce from rng. All metadata of rec must already be

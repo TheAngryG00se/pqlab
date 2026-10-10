@@ -8,9 +8,17 @@
 #include <string>
 #include <string_view>
 
+#include "pq/secure_bytes.hpp"
+
 namespace pq::keystore::fs {
 
 [[nodiscard]] std::string read_file(const std::filesystem::path& path);
+
+// For files that hold a secret: the bytes never pass through a std::string. Throws
+// pq::Error for files over 1 MiB.
+[[nodiscard]] SecureBytes read_secret_file(const std::filesystem::path& path);
+
+void fsync_file(const std::filesystem::path& path);
 
 // Writes a temporary file next to path (mode 0600, fsync), then renames it over path.
 // A reader sees either the old or the new content, never a mix.
