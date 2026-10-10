@@ -53,8 +53,7 @@ ByteView data_key(const SecureBytes& dek, const Aead& aead) {
 // Fills b.wrapped_dek and b.wrap_tag. b.kem_ct, b.kem_id and b.wrap_nonce must be set.
 void wrap_dek(Aead& aead, ByteView shared_secret, const PartA& a, PartB& b,
               const SecureBytes& dek) {
-  const SecureBytes kek =
-      derive_kek(shared_secret, b.kem_ct, b.kem_id, a.aead_id, aead.key_size());
+  const SecureBytes kek = derive_kek(shared_secret, b.kem_ct, b.kem_id, a.aead_id, aead.key_size());
   const Bytes sealed = aead.seal(kek, b.wrap_nonce, wrap_aad(a, b), dek);
   std::copy_n(sealed.begin(), kDekSize, b.wrapped_dek.begin());
   std::copy_n(sealed.begin() + kDekSize, kTagSize, b.wrap_tag.begin());
@@ -156,8 +155,8 @@ std::optional<SecureBytes> KemDem::open(ByteView sk, ByteView envelope) const {
   return plaintext;
 }
 
-std::optional<Bytes> KemDem::rewrap(ByteView old_sk, std::string_view new_kem_name,
-                                    ByteView new_pk, ByteView envelope, Rng& rng) const {
+std::optional<Bytes> KemDem::rewrap(ByteView old_sk, std::string_view new_kem_name, ByteView new_pk,
+                                    ByteView envelope, Rng& rng) const {
   const Header h = parse_header(envelope);
   const std::unique_ptr<Aead> aead = make_aead(registry_, aead_name(h.a.aead_id));
   const std::optional<SecureBytes> dek = unwrap_dek(registry_, h, old_sk, *aead);

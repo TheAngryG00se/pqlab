@@ -1,10 +1,9 @@
-#include "keystore/audit_log.hpp"
-
 #include <gtest/gtest.h>
 
 #include <fstream>
 #include <sstream>
 
+#include "keystore/audit_log.hpp"
 #include "keystore/fs_util.hpp"
 #include "pq/error.hpp"
 #include "support/temp_dir.hpp"

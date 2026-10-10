@@ -63,8 +63,7 @@ TEST(Policy, TransitionTable) {
       if (from == Status::kRetired && to == Status::kDestroyed) expect = true;
       if (from == Status::kRevoked && to == Status::kDestroyed) expect = true;
       if (to == Status::kRevoked && from != Status::kRevoked) expect = true;
-      EXPECT_EQ(transition_allowed(from, to), expect)
-          << to_string(from) << " -> " << to_string(to);
+      EXPECT_EQ(transition_allowed(from, to), expect) << to_string(from) << " -> " << to_string(to);
     }
   }
 }
@@ -155,8 +154,7 @@ TEST_F(RecordTest, ParseRejectsMalformedRecords) {
                pq::Error);
   EXPECT_THROW((void)parse_record(bad([](auto& j) { j["sealed"]["kdf_iterations"] = 0; })),
                pq::Error);
-  EXPECT_THROW((void)parse_record(bad([](auto& j) { j["sealed"]["kdf"] = "scrypt"; })),
-               pq::Error);
+  EXPECT_THROW((void)parse_record(bad([](auto& j) { j["sealed"]["kdf"] = "scrypt"; })), pq::Error);
   EXPECT_THROW((void)parse_record(bad([](auto& j) { j["label"] = std::string(257, 'x'); })),
                pq::Error);
   // An active key must carry a seed; a destroyed key must not.
@@ -241,8 +239,8 @@ TEST_F(RecordTest, SealRejectsBadArguments) {
 
 TEST_F(RecordTest, UnsealRefusesForeignAeadOrMissingSeed) {
   const KeyRecord sealed = sealed_record(rng_, *aead_);
-  auto other_ptr = std::make_unique<pq::test::StubGcm>(
-      std::make_unique<pq::test::XorCipher>("Other-256", 32));
+  auto other_ptr =
+      std::make_unique<pq::test::StubGcm>(std::make_unique<pq::test::XorCipher>("Other-256", 32));
   EXPECT_THROW((void)unseal_seed(sealed, kPassword, *other_ptr), pq::Error);
   EXPECT_THROW((void)unseal_seed(sample_record(), kPassword, *aead_), pq::Error);
 }

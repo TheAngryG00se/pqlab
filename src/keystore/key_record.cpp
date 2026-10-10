@@ -152,9 +152,10 @@ KeyRecord parse_record(std::string_view text) {
   if (j.is_discarded() || !j.is_object()) {
     throw Error("key record: not a JSON object");
   }
-  require_only(j, {"version", "key_id", "label", "kem", "status", "created", "status_changed", "pk",
-                   "sealed"},
-               "record");
+  require_only(
+      j,
+      {"version", "key_id", "label", "kem", "status", "created", "status_changed", "pk", "sealed"},
+      "record");
   KeyRecord rec;
   const int64_t version = int_field(j, "version");
   if (version != kRecordVersion) {

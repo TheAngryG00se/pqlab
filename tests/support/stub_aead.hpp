@@ -18,8 +18,8 @@
 #include "core/endian.hpp"
 #include "hash/hmac.hpp"
 #include "pq/aead.hpp"
-#include "pq/ct.hpp"
 #include "pq/cipher.hpp"
+#include "pq/ct.hpp"
 #include "pq/error.hpp"
 
 namespace pq::test {

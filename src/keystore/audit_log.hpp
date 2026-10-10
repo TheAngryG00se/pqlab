@@ -29,9 +29,9 @@ struct AuditEntry {
 
 struct AuditVerdict {
   bool ok = true;
-  size_t entries = 0;     // lines that passed
-  size_t bad_line = 0;    // 1-based number of the first failing line, 0 if ok
-  std::string problem;    // short reason, empty if ok
+  size_t entries = 0;   // lines that passed
+  size_t bad_line = 0;  // 1-based number of the first failing line, 0 if ok
+  std::string problem;  // short reason, empty if ok
 };
 
 class AuditLog {

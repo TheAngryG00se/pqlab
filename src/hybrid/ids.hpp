@@ -19,8 +19,8 @@ struct IdEntry {
 };
 
 inline constexpr std::array kKemIds = {
-    IdEntry{1, "ML-KEM-512"},  IdEntry{2, "ML-KEM-768"}, IdEntry{3, "ML-KEM-1024"},
-    IdEntry{16, "HQC-1"},      IdEntry{17, "HQC-3"},     IdEntry{18, "HQC-5"},
+    IdEntry{1, "ML-KEM-512"}, IdEntry{2, "ML-KEM-768"}, IdEntry{3, "ML-KEM-1024"},
+    IdEntry{16, "HQC-1"},     IdEntry{17, "HQC-3"},     IdEntry{18, "HQC-5"},
 };
 
 inline constexpr std::array kAeadIds = {

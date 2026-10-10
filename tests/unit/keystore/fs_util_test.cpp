@@ -16,7 +16,7 @@ namespace {
 namespace fs = pq::keystore::fs;
 
 mode_t mode_of(const std::filesystem::path& p) {
-  struct stat st {};
+  struct stat st{};
   EXPECT_EQ(::stat(p.c_str(), &st), 0);
   return st.st_mode & 0777;
 }
