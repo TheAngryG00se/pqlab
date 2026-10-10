@@ -47,6 +47,24 @@ TEST(Hex, RoundTripAndRejects) {
   EXPECT_THROW((void)from_hex("AB"), pq::Error);  // lowercase only: one spelling per value
 }
 
+TEST(FindKeyId, FullIdPrefixAndErrors) {
+  std::vector<KeyRecord> recs(3);
+  // Fabricate ids; find_key_id looks only at key_id.
+  recs[0].key_id = parse_key_id("aabbccdd00000000000000000000000a");
+  recs[1].key_id = parse_key_id("aabbccee00000000000000000000000b");
+  recs[2].key_id = parse_key_id("11223344556677889900aabbccddeeff");
+  EXPECT_EQ(find_key_id(recs, "aabbccdd"), recs[0].key_id);
+  EXPECT_EQ(find_key_id(recs, "aabbcce"), recs[1].key_id);
+  EXPECT_EQ(find_key_id(recs, "1122"), recs[2].key_id);
+  EXPECT_EQ(find_key_id(recs, "11223344556677889900aabbccddeeff"), recs[2].key_id);
+  EXPECT_THROW((void)find_key_id(recs, "aabbcc"), pq::Error);  // ambiguous
+  EXPECT_THROW((void)find_key_id(recs, "aab"), pq::Error);     // too short
+  EXPECT_THROW((void)find_key_id(recs, "ffff"), pq::Error);    // no match
+  EXPECT_THROW((void)find_key_id(recs, "AABB"), pq::Error);    // lowercase only
+  EXPECT_THROW((void)find_key_id(recs, std::string(33, 'a')), pq::Error);
+  EXPECT_THROW((void)find_key_id({}, "aabbccdd"), pq::Error);
+}
+
 TEST(Policy, StatusNamesRoundTrip) {
   for (const Status s : {Status::kActive, Status::kRetired, Status::kDestroyed, Status::kRevoked}) {
     EXPECT_EQ(parse_status(to_string(s)), s);

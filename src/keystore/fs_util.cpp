@@ -176,6 +176,50 @@ void exchange_dirs(const std::filesystem::path& a, const std::filesystem::path& 
   }
 }
 
+void replace_dir(const std::filesystem::path& stage, const std::filesystem::path& live) {
+  if (::renameat2(AT_FDCWD, stage.c_str(), AT_FDCWD, live.c_str(), RENAME_EXCHANGE) == 0) {
+    std::error_code ec;
+    std::filesystem::remove_all(stage, ec);  // after the exchange: the previous state
+    return;
+  }
+  // Only "not supported here" may fall back; anything else is a real error.
+  if (errno != EINVAL && errno != ENOSYS && errno != ENOTSUP) {
+    fail("cannot exchange directory with", live);
+  }
+  replace_dir_portable(stage, live);
+}
+
+void replace_dir_portable(const std::filesystem::path& stage, const std::filesystem::path& live) {
+  const std::filesystem::path old = live.string() + ".old";
+  std::error_code ec;
+  std::filesystem::remove_all(old, ec);
+  if (::rename(live.c_str(), old.c_str()) != 0) {
+    fail("cannot move aside", live);
+  }
+  if (::rename(stage.c_str(), live.c_str()) != 0) {
+    const int saved = errno;
+    ::rename(old.c_str(), live.c_str());  // put the old state back
+    errno = saved;
+    fail("cannot move into place", live);
+  }
+  fsync_dir(live.parent_path());
+  std::filesystem::remove_all(old, ec);
+}
+
+bool recover_dir(const std::filesystem::path& live) {
+  const std::filesystem::path old = live.string() + ".old";
+  std::error_code ec;
+  if (!std::filesystem::exists(old, ec)) {
+    return false;
+  }
+  if (std::filesystem::exists(live, ec)) {
+    std::filesystem::remove_all(old, ec);  // the new state was already in place
+  } else if (::rename(old.c_str(), live.c_str()) != 0) {
+    fail("cannot restore", live);
+  }
+  return true;
+}
+
 FileLock::FileLock(const std::filesystem::path& path) {
   fd_ = ::open(path.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);
   if (fd_ < 0) {
@@ -190,6 +234,8 @@ FileLock::FileLock(const std::filesystem::path& path) {
     }
   }
 }
+
+FileLock::FileLock(FileLock&& other) noexcept : fd_(other.fd_) { other.fd_ = -1; }
 
 FileLock::~FileLock() {
   if (fd_ >= 0) {

@@ -10,6 +10,7 @@
 #include <array>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -58,6 +59,10 @@ struct KeyRecord {
 // unsupported version, a key_id that is not SHA3-256(pk)[0..16], or a status that
 // contradicts the presence of the sealed seed.
 [[nodiscard]] KeyRecord parse_record(std::string_view json);
+
+// Key id named by a full id or a unique prefix of at least 4 hex digits (lowercase).
+// Throws pq::Error if the text is too short or too long, matches no record, or matches several.
+[[nodiscard]] KeyId find_key_id(std::span<const KeyRecord> records, std::string_view id_or_prefix);
 
 // Canonical binary encoding of everything but the ciphertext. Requires rec.sealed.
 [[nodiscard]] Bytes record_aad(const KeyRecord& rec);

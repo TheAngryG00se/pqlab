@@ -20,7 +20,6 @@ namespace stdfs = std::filesystem;
 
 constexpr std::string_view kAuditKeyFile = "audit.key";
 constexpr std::string_view kAuditLogFile = "audit.log";
-constexpr size_t kMinPrefixDigits = 4;
 
 stdfs::path record_path(const stdfs::path& dir, const KeyId& id) {
   return dir / (key_id_hex(id) + ".json");
@@ -65,9 +64,57 @@ std::vector<KeyRecord> load_all(const stdfs::path& dir) {
   return out;
 }
 
+// Strict UTF-8 (RFC 3629): no overlong forms, no surrogates, nothing above U+10FFFF.
+bool is_valid_utf8(std::string_view s) {
+  size_t i = 0;
+  while (i < s.size()) {
+    const auto lead = static_cast<uint8_t>(s[i]);
+    size_t extra = 0;
+    uint32_t cp = 0;
+    uint32_t min = 0;
+    if (lead < 0x80) {
+      ++i;
+      continue;
+    }
+    if ((lead & 0xE0) == 0xC0) {
+      extra = 1;
+      cp = lead & 0x1FU;
+      min = 0x80;
+    } else if ((lead & 0xF0) == 0xE0) {
+      extra = 2;
+      cp = lead & 0x0FU;
+      min = 0x800;
+    } else if ((lead & 0xF8) == 0xF0) {
+      extra = 3;
+      cp = lead & 0x07U;
+      min = 0x10000;
+    } else {
+      return false;
+    }
+    if (i + extra >= s.size()) {
+      return false;
+    }
+    for (size_t k = 1; k <= extra; ++k) {
+      const auto c = static_cast<uint8_t>(s[i + k]);
+      if ((c & 0xC0) != 0x80) {
+        return false;
+      }
+      cp = (cp << 6) | (c & 0x3FU);
+    }
+    if (cp < min || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) {
+      return false;
+    }
+    i += extra + 1;
+  }
+  return true;
+}
+
 void validate_label(std::string_view label) {
   if (label.size() > kMaxLabelSize) {
     throw Error("label is too long");
+  }
+  if (!is_valid_utf8(label)) {
+    throw Error("label is not valid UTF-8");
   }
   for (const char c : label) {
     const auto u = static_cast<uint8_t>(c);
@@ -116,6 +163,24 @@ int64_t Keystore::now() const { return opts_.clock(); }
 
 std::unique_ptr<Aead> Keystore::make_aead() const { return registry_.aead("GCM", opts_.cipher); }
 
+// A record names the AEAD it was sealed with ("AES-256-GCM"), so keys sealed under an
+// earlier `cipher` option stay readable.
+std::unique_ptr<Aead> Keystore::make_aead_for(const KeyRecord& rec) const {
+  constexpr std::string_view kSuffix = "-GCM";
+  const std::string& name = rec.sealed->aead;
+  if (name.size() <= kSuffix.size() ||
+      name.compare(name.size() - kSuffix.size(), kSuffix.size(), kSuffix) != 0) {
+    throw Error("key record names an unsupported AEAD");
+  }
+  return registry_.aead("GCM", std::string_view(name).substr(0, name.size() - kSuffix.size()));
+}
+
+fs::FileLock Keystore::acquire() const {
+  fs::FileLock lock(home_ / "keystore.lock");
+  fs::recover_dir(dir_);
+  return lock;
+}
+
 AuditLog Keystore::open_audit(const stdfs::path& dir) const {
   const SecureBytes key = fs::read_secret_file(dir / kAuditKeyFile);
   if (key.size() != 32) {
@@ -126,7 +191,7 @@ AuditLog Keystore::open_audit(const stdfs::path& dir) const {
 
 void Keystore::transact(const Mutation& mutation) {
   fs::make_private_dir(home_);
-  const fs::FileLock lock(home_ / "keystore.lock");
+  const fs::FileLock lock = acquire();
   fs::make_private_dir(dir_);
 
   const stdfs::path key_file = dir_ / kAuditKeyFile;
@@ -143,7 +208,10 @@ void Keystore::transact(const Mutation& mutation) {
   try {
     for (const auto& entry : stdfs::directory_iterator(dir_)) {
       if (entry.is_regular_file() && entry.path().extension() != ".tmp") {
-        stdfs::copy_file(entry.path(), stage / entry.path().filename());
+        const stdfs::path copy = stage / entry.path().filename();
+        stdfs::copy_file(entry.path(), copy);
+        stdfs::permissions(copy, stdfs::perms::owner_read | stdfs::perms::owner_write,
+                           stdfs::perm_options::replace);
       }
     }
     mutation(stage);
@@ -151,12 +219,11 @@ void Keystore::transact(const Mutation& mutation) {
       fs::fsync_file(entry.path());
     }
     fs::fsync_dir(stage);
-    fs::exchange_dirs(stage, dir_);
+    fs::replace_dir(stage, dir_);
   } catch (...) {
     stdfs::remove_all(stage, ec);
     throw;
   }
-  stdfs::remove_all(stage, ec);  // after the exchange this is the previous state
   fs::fsync_dir(home_);
 }
 
@@ -208,11 +275,12 @@ void Keystore::set_status_in(const stdfs::path& dir, const KeyId& id, Status to,
     rec.sealed.reset();
   } else if (rec.sealed) {
     // The status is part of the AAD: unseal under the old record, re-seal under the new.
-    const std::unique_ptr<Aead> aead = make_aead();
-    const std::optional<SecureBytes> seed = unseal_seed(before, password, *aead);
+    const std::unique_ptr<Aead> old_aead = make_aead_for(before);
+    const std::optional<SecureBytes> seed = unseal_seed(before, password, *old_aead);
     if (!seed) {
       throw PasswordError("wrong password or modified key record");
     }
+    const std::unique_ptr<Aead> aead = make_aead();
     seal_seed(rec, *seed, password, opts_.kdf_iterations, *aead, rng_);
   }
   write_record(dir, rec);
@@ -231,7 +299,7 @@ std::vector<KeyRecord> Keystore::list() const {
   if (!stdfs::exists(home_, ec)) {
     return {};
   }
-  const fs::FileLock lock(home_ / "keystore.lock");
+  const fs::FileLock lock = acquire();
   return load_all(dir_);
 }
 
@@ -240,27 +308,12 @@ KeyRecord Keystore::get(const KeyId& id) const {
   if (!stdfs::exists(home_, ec)) {
     throw Error("no such key: " + key_id_hex(id));
   }
-  const fs::FileLock lock(home_ / "keystore.lock");
+  const fs::FileLock lock = acquire();
   return load_record(dir_, id);
 }
 
 KeyId Keystore::resolve(std::string_view id_or_prefix) const {
-  if (id_or_prefix.size() < kMinPrefixDigits || id_or_prefix.size() > 2 * sizeof(KeyId)) {
-    throw Error("a key id needs between 4 and 32 hex digits");
-  }
-  std::optional<KeyId> found;
-  for (const KeyRecord& rec : list()) {
-    if (key_id_hex(rec.key_id).compare(0, id_or_prefix.size(), id_or_prefix) == 0) {
-      if (found) {
-        throw Error("key id prefix is ambiguous");
-      }
-      found = rec.key_id;
-    }
-  }
-  if (!found) {
-    throw Error("no key matches '" + std::string(id_or_prefix) + "'");
-  }
-  return *found;
+  return find_key_id(list(), id_or_prefix);
 }
 
 std::optional<KeyRecord> Keystore::active_key(std::string_view kem) const {
@@ -278,16 +331,19 @@ UnlockedKey Keystore::unlock(const KeyId& id, ByteView password) {
   if (!stdfs::exists(home_, ec)) {
     throw Error("no such key: " + key_id_hex(id));
   }
-  const fs::FileLock lock(home_ / "keystore.lock");
-  const KeyRecord rec = load_record(dir_, id);
+  KeyRecord rec;
+  {
+    // The lock is not held during the (slow) key derivation below.
+    const fs::FileLock lock = acquire();
+    rec = load_record(dir_, id);
+  }
   if (!can_unseal(rec.status) || !rec.sealed) {
     throw Error("key " + key_id_hex(id) + " is " + std::string(to_string(rec.status)));
   }
-  AuditLog audit = open_audit(dir_);
-  const std::unique_ptr<Aead> aead = make_aead();
+  const std::unique_ptr<Aead> aead = make_aead_for(rec);
   const std::optional<SecureBytes> seed = unseal_seed(rec, password, *aead);
   if (!seed) {
-    audit.append(now(), "unlock_failed", key_id_hex(id), "wrong password or modified record");
+    record_event("unlock_failed", id, "wrong password or modified record");
     throw PasswordError("wrong password or modified key record");
   }
   const std::unique_ptr<Kem> kem = registry_.kem(rec.kem);
@@ -295,7 +351,7 @@ UnlockedKey Keystore::unlock(const KeyId& id, ByteView password) {
   if (!ct_equal(kp.pk, rec.pk)) {
     throw Error("the stored seed does not produce the stored public key");
   }
-  audit.append(now(), "key_unlocked", key_id_hex(id), std::string(to_string(rec.status)));
+  record_event("key_unlocked", id, to_string(rec.status));
   return UnlockedKey{id, rec.kem, rec.status, std::move(kp.pk), std::move(kp.sk)};
 }
 
@@ -355,7 +411,8 @@ void Keystore::change_password(ByteView old_password, ByteView new_password) {
         if (!rec.sealed) {
           continue;
         }
-        const std::optional<SecureBytes> seed = unseal_seed(rec, old_password, *aead);
+        const std::unique_ptr<Aead> old_aead = make_aead_for(rec);
+        const std::optional<SecureBytes> seed = unseal_seed(rec, old_password, *old_aead);
         if (!seed) {
           throw PasswordError("key " + key_id_hex(rec.key_id) +
                               " does not open with the old password");
@@ -385,29 +442,38 @@ std::vector<KeyId> Keystore::rotation_due() const {
 
 void Keystore::record_event(std::string_view event, const KeyId& id, std::string_view detail) {
   std::error_code ec;
+  if (!stdfs::exists(home_, ec)) {
+    return;
+  }
+  const fs::FileLock lock = acquire();
   if (!stdfs::exists(dir_ / kAuditKeyFile, ec)) {
     return;  // nothing has ever been created here, so there is no log to extend
   }
-  const fs::FileLock lock(home_ / "keystore.lock");
   const bool no_key = id == KeyId{};
   open_audit(dir_).append(now(), event, no_key ? std::string() : key_id_hex(id), detail);
 }
 
 std::vector<AuditEntry> Keystore::audit_entries() const {
   std::error_code ec;
+  if (!stdfs::exists(home_, ec)) {
+    return {};
+  }
+  const fs::FileLock lock = acquire();
   if (!stdfs::exists(dir_ / kAuditKeyFile, ec)) {
     return {};
   }
-  const fs::FileLock lock(home_ / "keystore.lock");
   return open_audit(dir_).read();
 }
 
 AuditVerdict Keystore::verify_audit() const {
   std::error_code ec;
+  if (!stdfs::exists(home_, ec)) {
+    return {};
+  }
+  const fs::FileLock lock = acquire();
   if (!stdfs::exists(dir_ / kAuditKeyFile, ec)) {
     return {};
   }
-  const fs::FileLock lock(home_ / "keystore.lock");
   return open_audit(dir_).verify();
 }
 

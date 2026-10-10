@@ -52,11 +52,16 @@ plan, so that a compromised key's ciphertext does not have to stay on disk forev
 
 ## Atomicity
 
-Every writing operation copies the keystore directory to `<home>/keystore.stage`, applies the
-change there (record files and the audit entry), fsyncs, and swaps it in with
-`renameat2(RENAME_EXCHANGE)`. A crash or an exception leaves the old state, also for
-`rotate` (two records) and `change_password` (all records). A stale `keystore.stage` or
-`*.tmp` from a crashed run is cleaned up by the next operation. The lock serialises processes.
+Every writing operation copies the keystore directory to `<home>/keystore.stage` (files forced
+to 0600), applies the change there (record files and the audit entry), fsyncs, and swaps it in
+with one `renameat2(RENAME_EXCHANGE)`. A crash or an exception leaves the old state, also for
+`rotate` (two records) and `change_password` (all records). The lock serialises processes.
+
+Some file systems do not support `RENAME_EXCHANGE` (`/mnt/c` under WSL answers `EINVAL`). Then
+`fs::replace_dir` falls back to two renames (`keystore -> keystore.old`, `stage -> keystore`).
+A crash between them leaves `keystore` missing and `keystore.old` complete; every operation
+calls `fs::recover_dir` right after taking the lock and puts it back. A stale `keystore.stage`
+or `*.tmp` from a crashed run is cleaned up by the next write.
 
 ## Rotation and rewrap
 
@@ -82,9 +87,16 @@ key_id || detail)`. Events: `key_created`, `key_unlocked`, `unlock_failed`, `pas
 - `destroy` removes the ciphertext from the record, but the old blocks may stay on the device
   (copy-on-write file systems, SSD wear levelling, journals). Do not rely on it as a wipe.
 - Passwords are `ByteView`s; the caller is responsible for keeping them in `SecureBytes`.
-- The swap needs a Linux kernel and a file system with `RENAME_EXCHANGE` (ext4, btrfs, xfs,
-  tmpfs). Elsewhere it throws `pq::Error`.
-- The seed is sealed with `<cipher>-GCM` looked up in the registry (`AES-256-GCM` by default).
+- Keep `PQLAB_HOME` on a Linux file system. `/mnt/c` and other drvfs/9p mounts ignore Unix
+  modes (everything shows as 0777), so the 0600/0700 protection of the files is lost there; the
+  seeds are still encrypted, but `audit.key` is then readable by other Windows users.
+- Key unsealing runs PBKDF2 outside the lock (1.5 s at 600000 iterations when optimised), but
+  writing operations hold the lock for the whole derivation.
+- `unlock` writes an audit entry, so decryption fails if the audit log cannot be appended to
+  (read-only or full disk). This is deliberate: no use of a key goes unrecorded.
+- New seals use `<cipher>-GCM` from the registry (`AES-256-GCM` by default); an existing record
+  is opened with the AEAD it names, so changing the option does not lock old keys out. A
+  re-seal (retire, revoke, change_password) moves a record to the configured AEAD.
   Until `src/cipher` and `src/mode` register it in `Registry::global()`, the keystore works only
   with a registry that has it; the tests use `tests/support/stub_aead.hpp`.
 - Bulk rewrap of a directory of files (temporary directory, then `rename`) belongs to `pqtool`

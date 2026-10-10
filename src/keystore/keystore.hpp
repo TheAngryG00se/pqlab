@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "keystore/audit_log.hpp"
+#include "keystore/fs_util.hpp"
 #include "keystore/key_record.hpp"
 #include "keystore/policy.hpp"
 #include "keystore/seed_seal.hpp"
@@ -116,7 +117,11 @@ class Keystore {
 
   void transact(const Mutation& mutation);
   [[nodiscard]] int64_t now() const;
+  // AEAD for new seals (options.cipher), and the AEAD an existing record was sealed with.
   [[nodiscard]] std::unique_ptr<Aead> make_aead() const;
+  [[nodiscard]] std::unique_ptr<Aead> make_aead_for(const KeyRecord& rec) const;
+  // Takes keystore.lock and finishes a directory swap that a crash left half done.
+  [[nodiscard]] fs::FileLock acquire() const;
   [[nodiscard]] AuditLog open_audit(const std::filesystem::path& dir) const;
 
   // These run on a keystore directory (the live one or a stage) with the lock held.

@@ -186,6 +186,27 @@ KeyRecord parse_record(std::string_view text) {
   return rec;
 }
 
+KeyId find_key_id(std::span<const KeyRecord> records, std::string_view id_or_prefix) {
+  constexpr size_t kMinPrefixDigits = 4;
+  if (id_or_prefix.size() < kMinPrefixDigits ||
+      id_or_prefix.size() > 2 * std::tuple_size_v<KeyId>) {
+    throw Error("a key id needs between 4 and 32 hex digits");
+  }
+  std::optional<KeyId> found;
+  for (const KeyRecord& rec : records) {
+    if (key_id_hex(rec.key_id).compare(0, id_or_prefix.size(), id_or_prefix) == 0) {
+      if (found) {
+        throw Error("key id prefix is ambiguous");
+      }
+      found = rec.key_id;
+    }
+  }
+  if (!found) {
+    throw Error("no key matches '" + std::string(id_or_prefix) + "'");
+  }
+  return *found;
+}
+
 Bytes record_aad(const KeyRecord& rec) {
   if (!rec.sealed) {
     throw Error("record_aad: record has no sealed seed");

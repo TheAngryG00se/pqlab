@@ -36,6 +36,20 @@ void fsync_dir(const std::filesystem::path& dir);
 // RENAME_EXCHANGE). Throws pq::Error if the kernel or filesystem cannot do it.
 void exchange_dirs(const std::filesystem::path& a, const std::filesystem::path& b);
 
+// Replaces directory `live` with directory `stage` (same filesystem) and removes the old
+// contents. Uses exchange_dirs, which is atomic, and falls back to replace_dir_portable on
+// file systems without RENAME_EXCHANGE (for example /mnt/c under WSL).
+void replace_dir(const std::filesystem::path& stage, const std::filesystem::path& live);
+
+// Two renames: live -> live.old, stage -> live, then removes live.old. A crash between the
+// renames leaves live missing and live.old complete; recover_dir puts it back.
+void replace_dir_portable(const std::filesystem::path& stage, const std::filesystem::path& live);
+
+// Finishes or undoes an interrupted replace_dir_portable: if `live` is gone and live.old
+// exists, renames it back; if both exist, removes live.old. Returns true if it changed
+// anything.
+bool recover_dir(const std::filesystem::path& live);
+
 // Exclusive advisory lock (flock) on a file, held for the lifetime of the object.
 class FileLock {
  public:
@@ -43,6 +57,8 @@ class FileLock {
   ~FileLock();
   FileLock(const FileLock&) = delete;
   FileLock& operator=(const FileLock&) = delete;
+  FileLock(FileLock&& other) noexcept;
+  FileLock& operator=(FileLock&&) = delete;
 
  private:
   int fd_ = -1;

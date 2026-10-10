@@ -19,6 +19,7 @@ inline Registry make_test_registry() {
   mlkem::register_algorithms(r);
   r.add_kem(std::string(DummyKem::kName), [] { return std::make_unique<DummyKem>(); });
   r.add_cipher("AES-256", [] { return std::make_unique<XorCipher>("AES-256", 32); });
+  r.add_cipher("Kuznyechik", [] { return std::make_unique<XorCipher>("Kuznyechik", 32); });
   r.add_aead_mode("GCM", [](std::unique_ptr<BlockCipher> c) {
     return std::make_unique<StubGcm>(std::move(c));
   });

@@ -571,8 +571,13 @@ cmake --build --preset debug --target tidy          # clang-tidy
 - К рёбрам статусов добавлено `revoked → destroyed`.
 - Неверный пароль — `pq::keystore::PasswordError` (наследник `pq::Error`), а не `nullopt`.
 - Атомарна **каждая** операция записи, а не только многофайловые: состояние собирается в копии
-  каталога `keystore.stage` и подменяется через `renameat2(RENAME_EXCHANGE)`. Нужны Linux и
-  файловая система с `RENAME_EXCHANGE`. Все операции берут `flock` на `<home>/keystore.lock`.
+  каталога `keystore.stage` и подменяется через `renameat2(RENAME_EXCHANGE)`. Если файловая
+  система его не поддерживает (например `/mnt/c` в WSL), используются два `rename` и
+  восстановление `keystore.old` после сбоя (`fs::recover_dir`). Все операции берут `flock` на
+  `<home>/keystore.lock`. `PQLAB_HOME` нужно держать на Linux-ФС: на drvfs режимы 0600/0700
+  не действуют.
+- Запись называет AEAD, которым запечатан seed, и открывается именно им; опция `cipher`
+  влияет только на новые запечатывания.
 - Ключ журнала аудита лежит в `keystore/audit.key` (0600). Цепочка HMAC ловит правки, удаление,
   вставку и перестановку строк, но не отрезание хвоста и не защищает от того, кто читает
   `audit.key`.

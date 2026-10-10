@@ -84,6 +84,84 @@ TEST(FsUtil, ExchangeDirsSwapsContents) {
   EXPECT_THROW(fs::exchange_dirs(a, d.path() / "missing"), pq::Error);
 }
 
+// A directory with one file whose content names it.
+std::filesystem::path make_dir_with(const std::filesystem::path& dir, const std::string& content) {
+  fs::make_private_dir(dir);
+  fs::write_file_atomic(dir / "f", content);
+  return dir;
+}
+
+TEST(FsUtil, ReplaceDirSwapsAndRemovesTheOldState) {
+  pq::test::TempDir d;
+  const auto live = make_dir_with(d.path() / "live", "old");
+  const auto stage = make_dir_with(d.path() / "stage", "new");
+  fs::replace_dir(stage, live);
+  EXPECT_EQ(fs::read_file(live / "f"), "new");
+  EXPECT_FALSE(std::filesystem::exists(stage));
+  EXPECT_FALSE(std::filesystem::exists(d.path() / "live.old"));
+}
+
+TEST(FsUtil, ReplaceDirPortableDoesTheSameWithTwoRenames) {
+  pq::test::TempDir d;
+  const auto live = make_dir_with(d.path() / "live", "old");
+  const auto stage = make_dir_with(d.path() / "stage", "new");
+  // A stale live.old from an earlier crash must not get in the way.
+  make_dir_with(d.path() / "live.old", "stale");
+  fs::replace_dir_portable(stage, live);
+  EXPECT_EQ(fs::read_file(live / "f"), "new");
+  EXPECT_FALSE(std::filesystem::exists(stage));
+  EXPECT_FALSE(std::filesystem::exists(d.path() / "live.old"));
+}
+
+TEST(FsUtil, ReplaceDirPortableRestoresTheOldStateIfTheSecondRenameFails) {
+  pq::test::TempDir d;
+  const auto live = make_dir_with(d.path() / "live", "old");
+  EXPECT_THROW(fs::replace_dir_portable(d.path() / "no-such-stage", live), pq::Error);
+  EXPECT_EQ(fs::read_file(live / "f"), "old");
+  EXPECT_FALSE(std::filesystem::exists(d.path() / "live.old"));
+}
+
+TEST(FsUtil, RecoverDirHandlesEveryCrashPoint) {
+  pq::test::TempDir d;
+  const auto live = d.path() / "live";
+  // Nothing to do.
+  make_dir_with(live, "current");
+  EXPECT_FALSE(fs::recover_dir(live));
+  EXPECT_EQ(fs::read_file(live / "f"), "current");
+
+  // Crashed after live -> live.old: bring the old state back.
+  std::filesystem::rename(live, d.path() / "live.old");
+  EXPECT_TRUE(fs::recover_dir(live));
+  EXPECT_EQ(fs::read_file(live / "f"), "current");
+  EXPECT_FALSE(std::filesystem::exists(d.path() / "live.old"));
+
+  // Crashed after stage -> live, before live.old was removed: keep live, drop live.old.
+  make_dir_with(d.path() / "live.old", "previous");
+  EXPECT_TRUE(fs::recover_dir(live));
+  EXPECT_EQ(fs::read_file(live / "f"), "current");
+  EXPECT_FALSE(std::filesystem::exists(d.path() / "live.old"));
+}
+
+TEST(FsUtil, FileLockCanBeMoved) {
+  pq::test::TempDir d;
+  const auto lock_path = d.path() / "lock";
+  std::optional<fs::FileLock> moved;
+  {
+    fs::FileLock a(lock_path);
+    moved.emplace(std::move(a));
+  }  // a is gone, but the lock moved with the object
+  std::atomic<bool> got{false};
+  std::thread t([&] {
+    fs::FileLock b(lock_path);
+    got = true;
+  });
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  EXPECT_FALSE(got.load());
+  moved.reset();
+  t.join();
+  EXPECT_TRUE(got.load());
+}
+
 TEST(FsUtil, FileLockExcludesAnotherHolder) {
   pq::test::TempDir d;
   const auto lock = d.path() / "lock";

@@ -187,8 +187,12 @@ TEST_F(KeystoreTest, CreateKeyRejectsBadArguments) {
   EXPECT_THROW((void)ks.create_key("NoSuchKem", "x", kPw), pq::Error);
   EXPECT_THROW((void)ks.create_key("Dummy-KEM", std::string(257, 'a'), kPw), pq::Error);
   EXPECT_THROW((void)ks.create_key("Dummy-KEM", "line\nbreak", kPw), pq::Error);
-  EXPECT_THROW((void)ks.create_key("Dummy-KEM", "bad \xff utf8", kPw), pq::Error);
+  for (const char* bad : {"bad \xff utf8", "overlong \xc0\x80", "surrogate \xed\xa0\x80",
+                          "too big \xf4\x90\x80\x80", "cut short \xe2\x82", "stray \x80"}) {
+    EXPECT_THROW((void)ks.create_key("Dummy-KEM", bad, kPw), pq::Error) << bad;
+  }
   EXPECT_TRUE(ks.list().empty());
+  EXPECT_NO_THROW((void)ks.create_key("Dummy-KEM", "€ 𝄞 ключ", kPw));
   EXPECT_NO_THROW((void)ks.create_key("Dummy-KEM", "ключ №1", kPw));
 }
 
@@ -285,6 +289,24 @@ TEST_F(KeystoreTest, EditedRecordFilesAreRejected) {
   // A file under the wrong name is refused outright.
   stdfs::copy_file(file_of(id), ks_dir() / (std::string(32, '0') + ".json"));
   EXPECT_THROW((void)ks.list(), pq::Error);
+}
+
+TEST_F(KeystoreTest, SeedThatDoesNotMatchThePublicKeyIsRefused) {
+  // Someone who knows the password re-seals a different seed under the metadata of key A.
+  // The AEAD accepts it; only the pk check in unlock() notices.
+  Keystore ks = make();
+  const KeyId id = ks.create_key("Dummy-KEM", "a", kPw);
+  KeyRecord rec = ks.get(id);
+  const auto aead = registry_.aead("GCM", "AES-256");
+  seal_seed(rec, pq::Bytes(32, 0x77), kPw, kIters, *aead, rng_);
+  fs::write_file_atomic(file_of(id), serialize_record(rec));
+  try {
+    (void)ks.unlock(id, kPw);
+    FAIL() << "unlock accepted a seed that does not belong to the public key";
+  } catch (const PasswordError&) {
+    FAIL() << "the password was right; this is a format error";
+  } catch (const pq::Error&) {
+  }
 }
 
 TEST_F(KeystoreTest, RotateCreatesANewActiveKeyAndRetiresTheOld) {
@@ -469,6 +491,92 @@ TEST_F(KeystoreTest, ConcurrentWritersDoNotLoseKeys) {
   const AuditVerdict v = ks.verify_audit();
   EXPECT_TRUE(v.ok) << v.problem;
   EXPECT_EQ(v.entries, 1U + 2 * kPerThread);
+}
+
+TEST_F(KeystoreTest, FilesStayPrivateThroughManyOperations) {
+  Keystore ks = make();
+  const KeyId a = ks.create_key("Dummy-KEM", "a", kPw);
+  const KeyId b = ks.rotate(a, kPw);
+  ks.change_password(kPw, kOtherPw);
+  ks.retire(b, kOtherPw);
+  // Copies made while staging must keep 0600, whatever the umask is.
+  const mode_t old_umask = ::umask(0);
+  (void)ks.create_key("Dummy-KEM", "c", kOtherPw);
+  ::umask(old_umask);
+  for (const auto& e : stdfs::directory_iterator(ks_dir())) {
+    EXPECT_EQ(mode_of(e.path()), 0600U) << e.path();
+  }
+  EXPECT_EQ(mode_of(ks_dir()), 0700U);
+  EXPECT_EQ(mode_of(home_.path() / "pqlab" / "keystore.lock"), 0600U);
+}
+
+TEST_F(KeystoreTest, RecoversFromACrashDuringThePortableSwap) {
+  KeyId id;
+  {
+    Keystore ks = make();
+    id = ks.create_key("Dummy-KEM", "a", kPw);
+  }
+  const stdfs::path home = home_.path() / "pqlab";
+
+  // The first rename of the portable swap happened, the second did not.
+  stdfs::rename(ks_dir(), home / "keystore.old");
+  {
+    Keystore ks = make();
+    EXPECT_EQ(ks.list().size(), 1U);
+    EXPECT_NO_THROW((void)ks.unlock(id, kPw));
+    EXPECT_FALSE(stdfs::exists(home / "keystore.old"));
+  }
+
+  // Both renames happened, the old state was not yet removed. Writing must not lose data.
+  stdfs::create_directories(home / "keystore.old");
+  fs::write_file_atomic(home / "keystore.old" / "junk.json", "{}");
+  Keystore ks = make();
+  (void)ks.create_key("Dummy-KEM", "b", kPw);
+  EXPECT_EQ(ks.list().size(), 2U);
+  EXPECT_FALSE(stdfs::exists(home / "keystore.old"));
+  EXPECT_TRUE(ks.verify_audit().ok);
+}
+
+TEST_F(KeystoreTest, EachRecordNamesTheAeadItWasSealedWith) {
+  KeyId id;
+  {
+    Keystore ks = make();  // AES-256-GCM
+    id = ks.create_key("Dummy-KEM", "a", kPw);
+    EXPECT_EQ(ks.get(id).sealed->aead, "AES-256-GCM");
+  }
+  KeystoreOptions o = options();
+  o.cipher = "Kuznyechik";
+  Keystore ks(registry_, rng_, o);
+  // Still opens although the keystore now seals with another cipher.
+  EXPECT_NO_THROW((void)ks.unlock(id, kPw));
+  // Re-sealing moves the record to the configured AEAD.
+  ks.retire(id, kPw);
+  EXPECT_EQ(ks.get(id).sealed->aead, "Kuznyechik-GCM");
+  EXPECT_NO_THROW((void)ks.unlock(id, kPw));
+  const KeyId fresh = ks.create_key("Dummy-KEM", "b", kPw);
+  EXPECT_EQ(ks.get(fresh).sealed->aead, "Kuznyechik-GCM");
+
+  ks.change_password(kPw, kOtherPw);
+  EXPECT_NO_THROW((void)ks.unlock(id, kOtherPw));
+  // And the original configuration can read both kinds.
+  Keystore back = make();
+  EXPECT_NO_THROW((void)back.unlock(id, kOtherPw));
+  EXPECT_NO_THROW((void)back.unlock(fresh, kOtherPw));
+  EXPECT_TRUE(back.verify_audit().ok);
+}
+
+TEST_F(KeystoreTest, UnknownAeadInARecordIsAnErrorNotACrash) {
+  Keystore ks = make();
+  const KeyId id = ks.create_key("Dummy-KEM", "a", kPw);
+  std::string text = fs::read_file(file_of(id));
+  const auto pos = text.find("AES-256-GCM");
+  ASSERT_NE(pos, std::string::npos);
+  text.replace(pos, 11, "AES-256-OCB");
+  fs::write_file_atomic(file_of(id), text);
+  EXPECT_THROW((void)ks.unlock(id, kPw), pq::Error);
+  text.replace(pos, 11, "Magma-256-GCM");
+  fs::write_file_atomic(file_of(id), text);
+  EXPECT_THROW((void)ks.unlock(id, kPw), pq::Error);
 }
 
 TEST_F(KeystoreTest, DefaultsFollowAgentsMd) {

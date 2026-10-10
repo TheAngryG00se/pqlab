@@ -129,6 +129,33 @@ TEST_F(AuditTest, InsertedCopyIsDetected) {
   EXPECT_FALSE(log.verify().ok);
 }
 
+TEST_F(AuditTest, LineSplicedInFromAnotherHistoryIsDetected) {
+  // Every line carries a valid MAC of its own. Only the chain ties a line to its predecessors
+  // and successors, so a valid line with the right seq from a different history must be caught.
+  AuditLog log(file_, key_);
+  fill(log, 4);
+  const auto history_a = lines();
+
+  write_lines({history_a[0], history_a[1]});
+  log.append(5000, "forged", "abcd", "another history");  // seq 2 again, valid in history B
+  const auto history_b = lines();
+  ASSERT_EQ(history_b.size(), 3U);
+  ASSERT_NE(history_b[2], history_a[2]);
+
+  auto spliced = history_a;
+  spliced[2] = history_b[2];
+  write_lines(spliced);
+  const AuditVerdict v = log.verify();
+  EXPECT_FALSE(v.ok);
+  EXPECT_EQ(v.bad_line, 4U);  // the line after the splice no longer fits
+
+  // Each history alone is fine.
+  write_lines(history_a);
+  EXPECT_TRUE(log.verify().ok);
+  write_lines(history_b);
+  EXPECT_TRUE(log.verify().ok);
+}
+
 TEST_F(AuditTest, GarbageLineIsDetected) {
   AuditLog log(file_, key_);
   fill(log, 2);

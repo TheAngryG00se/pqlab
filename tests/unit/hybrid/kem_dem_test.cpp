@@ -94,7 +94,8 @@ TEST_F(KemDemTest, EveryEnvelopeUsesFreshRandomness) {
   EXPECT_NE(h1.a.nonce_prefix, h2.a.nonce_prefix);
   EXPECT_NE(h1.b.kem_ct, h2.b.kem_ct);
   EXPECT_NE(h1.b.wrapped_dek, h2.b.wrapped_dek);
-  EXPECT_NE(pq::Bytes(e1.begin() + h1.size, e1.end()), pq::Bytes(e2.begin() + h2.size, e2.end()));
+  EXPECT_NE(pq::Bytes(e1.begin() + static_cast<std::ptrdiff_t>(h1.size), e1.end()),
+            pq::Bytes(e2.begin() + static_cast<std::ptrdiff_t>(h2.size), e2.end()));
 }
 
 TEST_F(KemDemTest, WrongKeyYieldsNullopt) {
