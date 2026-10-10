@@ -140,7 +140,11 @@ std::string serialize_record(const KeyRecord& rec) {
     s["ciphertext"] = to_hex(rec.sealed->ciphertext);
     j["sealed"] = std::move(s);
   }
-  return j.dump(2) + "\n";
+  try {
+    return j.dump(2) + "\n";
+  } catch (const Json::exception&) {
+    throw Error("key record: label is not valid UTF-8");
+  }
 }
 
 KeyRecord parse_record(std::string_view text) {
