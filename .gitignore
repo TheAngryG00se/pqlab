@@ -3,4 +3,5 @@ build/
 !/results/final/
 compile_commands.json
 .cache/
+__pycache__/
 *.key
