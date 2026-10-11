@@ -1,6 +1,6 @@
 # Zone: participant 4. Minimal skeleton written by participant 1 so that the
 # core and hash layers can be built and tested; to be extended by participant 4.
-cmake_minimum_required(VERSION 3.22)
+cmake_minimum_required(VERSION 3.24)
 
 project(pqlab LANGUAGES CXX)
 
