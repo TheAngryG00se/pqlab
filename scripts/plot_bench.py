@@ -50,6 +50,8 @@ def load_rows(path):
                 row[key] = int(row[key])
             if row["msg_bytes"] < 0 or row["iterations"] <= 0:
                 raise ValueError("invalid size or iteration count")
+            if (row["primitive"] == "KEM" or row["op"] == "set_key") and row["msg_bytes"] != 0:
+                raise ValueError("KEM and key setup measurements must have msg_bytes=0")
             if row["primitive"] == "KEM" and row["iterations"] < 10000:
                 raise ValueError("KEM measurements need at least 10000 iterations")
             for key in ("median_ns", "stddev_ns"):

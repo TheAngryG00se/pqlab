@@ -41,6 +41,7 @@ class PlotBenchTest(unittest.TestCase):
         for changes in [
             {"median_ns": "0"}, {"median_ns": "nan"}, {"stddev_ns": "-1"},
             {"p95_cycles": "50"}, {"iterations": "9999"}, {"p5_cycles": ""},
+            {"msg_bytes": "16"},
         ]:
             with self.subTest(changes=changes), self.assertRaises(ValueError):
                 self.read([self.record(**changes)])
