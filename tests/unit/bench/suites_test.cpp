@@ -35,7 +35,7 @@ TEST(BenchSuites, MeasuresCipherAndAeadThroughPublicContracts) {
   options.suite = "cipher";
   options.seconds = 0;
   options.warmup = 1;
-  options.sizes = {16};
+  options.sizes.assign(1, 16);
   std::vector<pq::bench::Result> results;
   const auto consume = [&](const auto& r) { results.push_back(r); };
   EXPECT_EQ(pq::bench::run_benchmarks(registry, options, consume), 3U);
