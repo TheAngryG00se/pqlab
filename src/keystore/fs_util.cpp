@@ -78,7 +78,7 @@ SecureBytes read_secret_file(const std::filesystem::path& path) {
   if (f.fd < 0) {
     fail("cannot open", path);
   }
-  struct stat st{};
+  struct stat st {};
   if (::fstat(f.fd, &st) != 0) {
     fail("cannot stat", path);
   }

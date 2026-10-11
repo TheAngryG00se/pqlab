@@ -36,6 +36,10 @@ target_link_libraries(pqlab PRIVATE pq_warnings nlohmann_json::nlohmann_json)
 
 add_subdirectory(src)
 
+if(PQ_BUILD_BENCH)
+  add_subdirectory(bench)
+endif()
+
 if(PQ_BUILD_TESTS)
   enable_testing()
   add_subdirectory(tests)
