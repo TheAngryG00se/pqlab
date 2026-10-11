@@ -1,0 +1,8 @@
+#pragma once
+#include <string_view>
+namespace pq::bench {
+inline constexpr std::string_view kBuildType = "@CMAKE_BUILD_TYPE@";
+inline constexpr char kBuildCommit[] = "@PQ_BENCH_COMMIT@";
+inline constexpr char kBuildCompiler[] = "@CMAKE_CXX_COMPILER_ID@ @CMAKE_CXX_COMPILER_VERSION@";
+inline constexpr char kBuildFlags[] = R"flags(@PQ_BENCH_FLAGS@)flags";
+}

@@ -38,6 +38,7 @@ add_subdirectory(src)
 
 if(PQ_BUILD_BENCH)
   add_subdirectory(bench)
+  add_subdirectory(apps/pqbench)
 endif()
 
 if(PQ_BUILD_TESTS)
