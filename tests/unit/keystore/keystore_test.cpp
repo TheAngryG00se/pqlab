@@ -26,7 +26,7 @@ const pq::Bytes kPw = {'s', 'e', 'c', 'r', 'e', 't'};
 const pq::Bytes kOtherPw = {'o', 't', 'h', 'e', 'r'};
 
 mode_t mode_of(const stdfs::path& p) {
-  struct stat st{};
+  struct stat st {};
   EXPECT_EQ(::stat(p.c_str(), &st), 0);
   return st.st_mode & 0777;
 }

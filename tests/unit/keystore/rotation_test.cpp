@@ -102,7 +102,8 @@ TEST_F(RotationTest, RotateThenRewrapMovesDataToTheNewKey) {
   EXPECT_EQ(to_bytes(decrypt(ks_, kd_, moved, kPw)), pt);
   EXPECT_THROW((void)decrypt(ks_, kd_, env, kPw), pq::Error);
 
-  EXPECT_TRUE(std::any_of(ks_.audit_entries().begin(), ks_.audit_entries().end(),
+  const auto entries = ks_.audit_entries();
+  EXPECT_TRUE(std::any_of(entries.begin(), entries.end(),
                           [](const AuditEntry& e) { return e.event == "envelope_rewrapped"; }));
   EXPECT_TRUE(ks_.verify_audit().ok);
 }

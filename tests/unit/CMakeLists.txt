@@ -9,4 +9,9 @@ add_subdirectory(hybrid)
 add_subdirectory(keystore)
 add_subdirectory(mlkem)
 
+if(PQ_BUILD_BENCH)
+  target_link_libraries(pq_unit_tests PRIVATE pq_bench)
+  add_subdirectory(bench)
+endif()
+
 gtest_discover_tests(pq_unit_tests DISCOVERY_TIMEOUT 60)
