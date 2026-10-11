@@ -88,6 +88,7 @@ def render(rows, output_dir, formats):
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    from matplotlib.ticker import FuncFormatter
 
     plt.rcParams.update({
         "font.family": "DejaVu Sans", "font.size": 10,
@@ -149,7 +150,8 @@ def render(rows, output_dir, formats):
                     fmt="o", capsize=5, color=COLORS[index],
                 )
                 ax.set_title(op)
-                ax.set_xlabel("Такты TSC")
+                ax.set_xlabel("Тысячи тактов TSC")
+                ax.xaxis.set_major_formatter(FuncFormatter(lambda value, _: f"{value / 1000:g}"))
                 ax.set_xlim(left=0)
                 ax.grid(axis="x", alpha=0.18)
             axes[0].set_yticks(range(len(names)), names)
