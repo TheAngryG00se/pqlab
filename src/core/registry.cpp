@@ -63,7 +63,17 @@ void Registry::add_cipher(std::string name, CipherFactory factory) {
 }
 
 void Registry::add_aead_mode(std::string mode, AeadFactory factory) {
+  if (cipher_modes_.contains(mode)) {
+    throw Error("Registry: duplicate mode '" + mode + "'");
+  }
   add_unique(aead_modes_, std::move(mode), std::move(factory), "AEAD mode");
+}
+
+void Registry::add_cipher_mode(std::string mode, CipherModeFactory factory) {
+  if (aead_modes_.contains(mode)) {
+    throw Error("Registry: duplicate mode '" + mode + "'");
+  }
+  add_unique(cipher_modes_, std::move(mode), std::move(factory), "cipher mode");
 }
 
 std::unique_ptr<Kem> Registry::kem(std::string_view name) const {
@@ -79,8 +89,15 @@ std::unique_ptr<Aead> Registry::aead(std::string_view mode, std::string_view cip
   return make_mode(cipher(cipher_name));
 }
 
+std::unique_ptr<CipherMode> Registry::cipher_mode(std::string_view mode,
+                                                  std::string_view cipher_name) const {
+  const CipherModeFactory& make_mode = find_or_throw(cipher_modes_, mode, "cipher mode");
+  return make_mode(cipher(cipher_name));
+}
+
 std::vector<std::string> Registry::list_kems() const { return keys_of(kems_); }
 std::vector<std::string> Registry::list_ciphers() const { return keys_of(ciphers_); }
 std::vector<std::string> Registry::list_modes() const { return keys_of(aead_modes_); }
+std::vector<std::string> Registry::list_cipher_modes() const { return keys_of(cipher_modes_); }
 
 }  // namespace pq
