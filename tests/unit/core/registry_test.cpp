@@ -34,6 +34,8 @@ TEST(Registry, UnknownNamesThrow) {
   EXPECT_THROW((void)r.cipher("Magma"), pq::Error);
   EXPECT_THROW((void)r.aead("MGM", "AES-256"), pq::Error);
   EXPECT_THROW((void)r.aead("GCM", "Magma"), pq::Error);
+  EXPECT_THROW((void)r.cipher_mode("OFB", "AES-256"), pq::Error);
+  EXPECT_THROW((void)r.cipher_mode("ECB", "Magma"), pq::Error);
 }
 
 TEST(Registry, DuplicateAndEmptyRegistrationsThrow) {
@@ -54,6 +56,40 @@ TEST(Registry, AeadIsBuiltFromModeAndCipher) {
   EXPECT_EQ(aead->tag_size(), 16U);
   EXPECT_TRUE(contains(r.list_modes(), "GCM"));
   EXPECT_TRUE(contains(r.list_ciphers(), "AES-256"));
+}
+
+TEST(Registry, CipherModeIsBuiltFromModeAndCipher) {
+  const pq::Registry r = pq::test::make_test_registry();
+  const auto mode = r.cipher_mode("ECB", "Kuznyechik");
+  EXPECT_EQ(mode->name(), "Kuznyechik-ECB");
+  EXPECT_EQ(mode->key_size(), 32U);
+  EXPECT_EQ(mode->block_size(), 16U);
+  EXPECT_EQ(mode->iv_size(), 0U);
+}
+
+// list_modes() keeps meaning "AEAD modes": pqbench calls aead() for every name in it.
+TEST(Registry, AeadAndCipherModesAreListedSeparately) {
+  const pq::Registry r = pq::test::make_test_registry();
+  EXPECT_TRUE(contains(r.list_cipher_modes(), "ECB"));
+  EXPECT_FALSE(contains(r.list_cipher_modes(), "GCM"));
+  EXPECT_TRUE(contains(r.list_modes(), "GCM"));
+  EXPECT_FALSE(contains(r.list_modes(), "ECB"));
+  EXPECT_THROW((void)r.aead("ECB", "AES-256"), pq::Error);
+  EXPECT_THROW((void)r.cipher_mode("GCM", "AES-256"), pq::Error);
+}
+
+TEST(Registry, ModeNamesAreUniqueAcrossAeadAndCipherModes) {
+  pq::Registry r = pq::test::make_test_registry();
+  const auto ecb = [](std::unique_ptr<pq::BlockCipher> c) {
+    return std::make_unique<pq::test::StubEcb>(std::move(c));
+  };
+  const auto gcm = [](std::unique_ptr<pq::BlockCipher> c) {
+    return std::make_unique<pq::test::StubGcm>(std::move(c));
+  };
+  EXPECT_THROW(r.add_cipher_mode("ECB", ecb), pq::Error);
+  EXPECT_THROW(r.add_cipher_mode("GCM", ecb), pq::Error);
+  EXPECT_THROW(r.add_aead_mode("ECB", gcm), pq::Error);
+  EXPECT_THROW(r.add_cipher_mode("CTR", pq::Registry::CipherModeFactory{}), pq::Error);
 }
 
 TEST(Registry, FactoriesReturnIndependentInstances) {
@@ -85,6 +121,25 @@ TEST(StubAead, SealOpenRoundTripAndTamperDetection) {
   const std::array<uint8_t, 3> other_aad{7, 8, 0};
   EXPECT_FALSE(aead->open(key, nonce, other_aad, ct).has_value());
   EXPECT_THROW((void)aead->seal(pq::ByteView(key).first(31), nonce, aad, pt), pq::Error);
+}
+
+TEST(StubEcb, RoundTripAndLengthChecks) {
+  const pq::Registry r = pq::test::make_test_registry();
+  const auto mode = r.cipher_mode("ECB", "AES-256");
+  const std::array<uint8_t, 32> key{1, 2, 3};
+  pq::Bytes pt(48);
+  std::iota(pt.begin(), pt.end(), uint8_t{0});
+
+  const pq::Bytes ct = mode->encrypt(key, {}, pt);
+  ASSERT_EQ(ct.size(), pt.size());
+  const auto back = mode->decrypt(key, {}, ct);
+  ASSERT_TRUE(back.has_value());
+  EXPECT_EQ(pq::Bytes(back->begin(), back->end()), pt);
+
+  const std::array<uint8_t, 16> iv{};
+  EXPECT_THROW((void)mode->encrypt(key, iv, pt), pq::Error);
+  EXPECT_THROW((void)mode->encrypt(key, {}, pq::ByteView(pt).first(47)), pq::Error);
+  EXPECT_THROW((void)mode->encrypt(pq::ByteView(key).first(16), {}, pt), pq::Error);
 }
 
 TEST(DummyKem, EncapsDecapsAgreeAndWrongKeyDisagrees) {

@@ -523,8 +523,18 @@ cmake --build --preset debug --target tidy          # clang-tidy
 - `SystemRng`, `DeterministicRng` и `Registry` реализованы в `src/core` (участник 4).
   `Registry::global()` пока регистрирует только ML-KEM; шифры, режимы и HQC добавляют свои
   `register_algorithms()` в `src/core/registry.cpp`.
-- Открытый вопрос: интерфейса для режимов без аутентификации (ECB, CBC, CTR) нет ни в
-  плане, ни в коде; `Registry::list_modes()` перечисляет только AEAD-режимы.
+- Режимы без аутентификации (ECB, CBC, CTR) реализуют `pq::CipherMode`
+  (`include/pq/cipher_mode.hpp`): `encrypt(key, iv, pt) → Bytes`,
+  `decrypt(key, iv, ct) → std::optional<SecureBytes>`, ключ и IV передаются при каждом вызове.
+  ECB — без IV и без паддинга (длина кратна блоку), CBC — IV длиной в блок и всегда PKCS#7,
+  CTR — начальный блок счётчика длиной в блок, любая длина. Неверный паддинг CBC — `nullopt`,
+  проверка за постоянное время; неверные длины — `pq::Error`. Имя режима — `<шифр>-<режим>`
+  (`AES-256-CBC`).
+- В `Registry` они регистрируются через `add_cipher_mode` (фабрика получает
+  `std::unique_ptr<BlockCipher>`), создаются через `cipher_mode(mode, cipher)` и перечисляются
+  `list_cipher_modes()`. `list_modes()` по-прежнему возвращает только AEAD-режимы. Имена режимов
+  общие для обоих списков: `"GCM"` нельзя зарегистрировать ещё и как `CipherMode`.
+- `pqtool` и KEM-DEM `CipherMode` не используют: он только для замеров и анализа.
 
 ### ML-KEM
 - «Наивная» NTT (`ntt_ref`, `inv_ntt_ref`, `multiply_ntts_ref`) тоже работает за
@@ -623,7 +633,8 @@ cmake --build --preset debug --target tidy          # clang-tidy
   кода или коммита Release надо сконфигурировать заново. Рабочие изменения помечаются
   суффиксом `-dirty`.
 - Пока доступен только ML-KEM. Заглушки используются исключительно в unit-тестах
-  движка, в `pqbench` не регистрируются. ECB/CBC/CTR ждут согласованного интерфейса.
+  движка, в `pqbench` не регистрируются. Интерфейс для ECB/CBC/CTR есть
+  (`pq::CipherMode`, раздел 14); набор замеров для него появится вместе с реализациями.
 - `scripts/plot_bench.py` строит PNG/SVG (и PDF по опции) из CSV: сравнение времени
   операций KEM, p5/p95 в тактах TSC, скорость шифров/AEAD и время KEM-DEM от размера.
   Скрипт не смешивает разные запуски и не генерирует отсутствующие измерения.
