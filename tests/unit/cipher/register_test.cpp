@@ -15,3 +15,12 @@ TEST(CipherRegistry, AesVariantsAreIndependentAndUseFullRounds) {
     EXPECT_NE(first.get(), second.get());
   }
 }
+
+TEST(CipherRegistry, KuznyechikUsesTheCanonicalNameAndFullRounds) {
+  pq::Registry registry;
+  pq::cipher::register_algorithms(registry);
+  const auto cipher = registry.cipher("Kuznyechik");
+  EXPECT_EQ(cipher->name(), "Kuznyechik");
+  EXPECT_EQ(cipher->key_size(), 32U);
+  EXPECT_EQ(cipher->rounds(), 10);
+}

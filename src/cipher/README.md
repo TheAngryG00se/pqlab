@@ -1,6 +1,7 @@
 # Блочные шифры участника 3
 
-Реализация AES-128/192/256: [AES.md](AES.md). Объект реализует существующий
+Реализация AES-128/192/256: [AES.md](AES.md); «Кузнечик»: [kuznyechik.md](kuznyechik.md).
+Каждый объект реализует существующий
 `pq::BlockCipher`; для создания по каноническому имени модуль предоставляет
 `pq::cipher::register_algorithms(Registry&)` в `register.hpp`.
 
