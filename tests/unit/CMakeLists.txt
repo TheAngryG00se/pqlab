@@ -8,6 +8,7 @@ add_subdirectory(hash)
 add_subdirectory(hybrid)
 add_subdirectory(keystore)
 add_subdirectory(mlkem)
+add_subdirectory(cipher)
 
 if(PQ_BUILD_BENCH)
   target_link_libraries(pq_unit_tests PRIVATE pq_bench)
