@@ -55,6 +55,10 @@ inline std::vector<KatRecord> read_rsp(const std::string& relative) {
     if (line[0] == '#') {
       continue;
     }
+    if (line == "FAIL") {
+      cur.fields["FAIL"] = "";
+      continue;
+    }
     const bool is_section = line.front() == '[' && line.back() == ']';
     if (is_section) {
       flush();
