@@ -521,8 +521,9 @@ cmake --build --preset debug --target tidy          # clang-tidy
 - `secure_zero`, `SecureBytes` и `ct_*` реализованы прямо в заголовках `include/pq/`,
   а не в `src/core`.
 - `SystemRng`, `DeterministicRng` и `Registry` реализованы в `src/core` (участник 4).
-  `Registry::global()` пока регистрирует только ML-KEM; шифры, режимы и HQC добавляют свои
-  `register_algorithms()` в `src/core/registry.cpp`.
+  `Registry::global()` пока регистрирует только ML-KEM. У шифров и режимов функции
+  `register_algorithms()` уже есть, но в `src/core/registry.cpp` они ещё не вызываются
+  (раздел 17); HQC добавит свою туда же.
 - Режимы без аутентификации (ECB, CBC, CTR) реализуют `pq::CipherMode`
   (`include/pq/cipher_mode.hpp`): `encrypt(key, iv, pt) → Bytes`,
   `decrypt(key, iv, ct) → std::optional<SecureBytes>`, ключ и IV передаются при каждом вызове.
@@ -550,7 +551,10 @@ cmake --build --preset debug --target tidy          # clang-tidy
 - KAT-тесты лежат в `tests/unit/<модуль>/` и входят в общий бинарник `pq_unit_tests`;
   в `tests/kat/` только данные и README. Парсер файлов `.rsp` —
   `tests/support/kat_reader.hpp`.
-- Векторы CAVP (SHA-3) и ACVP (ML-KEM) закоммичены целиком, `tests/kat/fetch.sh` не нужен.
+- Векторы CAVP (SHA-3, AES, GCM) и ACVP (ML-KEM) закоммичены целиком, `tests/kat/fetch.sh`
+  не нужен. Самый большой каталог — `tests/kat/gcm/` (около 18 МБ).
+- Парсер `.rsp` понимает строку `FAIL` (отрицательные записи CAVP GCM): она попадает в
+  запись как поле `FAIL` с пустым значением.
 - Эталоны HMAC/HKDF/PBKDF2 сгенерированы OpenSSL 3.0.2, а не ≥ 3.5. Наибольшее число
   итераций PBKDF2 в векторах — 20 000, а не 600 000: иначе тест в debug идёт десятки секунд.
 
@@ -605,8 +609,10 @@ cmake --build --preset debug --target tidy          # clang-tidy
   (раньше только к тестам).
 - Заглушки для тестов в `tests/support/`: `DummyKem`, `XorCipher`, `StubGcm` (AEAD поверх
   блочного шифра, тег HMAC-SHA3-256), `test_registry.hpp` (локальный `Registry` с именами
-  `AES-256` и `GCM`), `temp_dir.hpp`. Настоящего AES-GCM в репозитории пока нет, поэтому
-  `KemDem` и `Keystore` работают только с реестром, где он зарегистрирован.
+  `AES-256` и `GCM`), `temp_dir.hpp`. Настоящий AES-GCM есть (`src/mode/gcm`, раздел 17),
+  но в `Registry::global()` он пока не зарегистрирован, поэтому `KemDem` и `Keystore` по-прежнему
+  работают только с реестром, который передан явно. С настоящими шифрами `KemDem` проверяется
+  в `tests/unit/mode/hybrid_real_test.cpp` через `participant3_registry()`.
 
 ---
 
@@ -632,9 +638,10 @@ cmake --build --preset debug --target tidy          # clang-tidy
 - Метаданные commit/compiler/flags фиксируются при конфигурации CMake; после изменения
   кода или коммита Release надо сконфигурировать заново. Рабочие изменения помечаются
   суффиксом `-dirty`.
-- Пока доступен только ML-KEM. Заглушки используются исключительно в unit-тестах
-  движка, в `pqbench` не регистрируются. Интерфейс для ECB/CBC/CTR есть
-  (`pq::CipherMode`, раздел 14); набор замеров для него появится вместе с реализациями.
+- Пока доступен только ML-KEM: AES, «Кузнечик» и режимы реализованы (раздел 17), но не
+  подключены к рабочей сборке и `Registry::global()`, поэтому наборы `cipher`, `aead` и
+  `hybrid` пусты. Заглушки используются исключительно в unit-тестах движка, в `pqbench` не
+  регистрируются. Набора замеров для `pq::CipherMode` (ECB/CBC/CTR) ещё нет.
 - `scripts/plot_bench.py` строит PNG/SVG (и PDF по опции) из CSV: сравнение времени
   операций KEM, p5/p95 в тактах TSC, скорость шифров/AEAD и время KEM-DEM от размера.
   Скрипт не смешивает разные запуски и не генерирует отсутствующие измерения.
@@ -647,3 +654,81 @@ cmake --build --preset debug --target tidy          # clang-tidy
   серией явно отделяет конфигурации; CPU и набор операций/размеров обязаны совпадать.
   Сводные CSV имеют собственные колонки и не заменяют первичный формат раздела 11.
 - Пошаговая инструкция сборки на GCC 13 и просмотра графиков — `docs/benchmarking.md`.
+
+---
+
+## 17. Шифры, режимы и анализ: реализация участника 3
+
+Зафиксировано 2026-10-14 после слияния PR #4 (`feat/cipher-modes-analysis`). Это зона
+участника 3; при расхождении с разделами 5, 9 и 11 верен этот раздел. Подробности — в
+`src/cipher/README.md`, `src/cipher/AES.md`, `src/cipher/kuznyechik.md`, `src/mode/README.md`,
+`analysis/avalanche/README.md`, `analysis/sbox/README.md` и `docs/analysis.md`.
+
+### Что реализовано
+- `src/cipher/`: `pq::cipher::Aes(key_bits)` для 128/192/256 бит (FIPS 197-upd1, побайтовая
+  реализация) и `pq::cipher::Kuznyechik` (ГОСТ Р 34.12-2015). S-блоки табличные: это
+  разрешённое разделом 4.3 исключение, в заголовках оно отмечено.
+- `set_rounds(r)` принимает `r` от 1 до полного числа раундов, иначе `pq::Error`. У «Кузнечика»
+  `r` раундов — это `r − 1` шагов LSX и финальный `X[K_r]`. Вызывать только из `analysis/`.
+- `src/mode/`: ECB, CBC + PKCS#7 и CTR реализуют `pq::CipherMode`; GHASH и GCM — `pq::Aead`
+  поверх любого 128-битного `BlockCipher`. Общие проверки длин — в `mode_common.hpp`,
+  паддинг — в `padding.{hpp,cpp}`.
+- CTR увеличивает весь блок счётчика как big-endian число; переполнение отвергается до
+  обработки данных. Уникальность счётчиков между вызовами обеспечивает вызывающий код.
+- GCM поддерживает только профиль PQL1: nonce 12 байт, тег 16 байт, результат
+  `ciphertext ‖ tag`, лимиты длин из SP 800-38D. `open` сначала проверяет тег через
+  `ct_equal` и только потом расшифровывает. Имя AEAD — `<шифр>-GCM`.
+- «Кузнечик»-GCM — композиция стенда: векторов для неё нет, её проверяют свойства и
+  интеграционные тесты.
+- Регистрация: `pq::cipher::register_algorithms` (`src/cipher/register.hpp`) добавляет
+  `AES-128`, `AES-192`, `AES-256`, `Kuznyechik`; `pq::mode::register_algorithms`
+  (`src/mode/register.hpp`) добавляет AEAD-режим `GCM` и `CipherMode` `ECB`, `CBC`, `CTR`.
+- `analysis/avalanche/`: движок `avalanche.hpp` (функция `ByteView → Bytes`, гистограмма
+  расстояния Хэмминга, среднее, дисперсия, SAC, опционально BIC, ограничение памяти
+  `max_memory_bytes`, `binomial_chi_square` без p-value) и `experiments.hpp` (изменение
+  сообщения и ключа, анализ по раундам, распространение ошибок в ECB/CBC/CTR, отказ AEAD).
+  Эксперименты получают алгоритмы только через переданный `Registry`.
+- `analysis/sbox/`: `analyze_sbox` — DDT, знаковая LAT, дифференциальная равномерность,
+  нелинейность и проверка биективности для таблицы из 256 элементов.
+- Атаки участника 3 (Square на 4 раунда AES, CBC padding oracle) ещё не написаны,
+  `analysis/attacks/` в репозитории нет.
+
+### Не подключено к рабочей сборке
+Участник 3 не менял файлы участника 4, поэтому код его зоны пока живёт только в тестах:
+- `src/CMakeLists.txt` не делает `add_subdirectory(cipher)` и `add_subdirectory(mode)`.
+  `tests/unit/cipher/CMakeLists.txt` и `tests/unit/mode/CMakeLists.txt` компилируют исходники
+  из `src/cipher/` и `src/mode/` прямо в `pq_unit_tests`.
+- `Registry::global()` не вызывает `cipher::register_algorithms` и `mode::register_algorithms`.
+  Поэтому `pqbench`, `KemDem` и `Keystore` в рабочих программах настоящих шифров не видят.
+- Библиотека `pq_analysis` (`analysis/avalanche` + `analysis/sbox`) создаётся только из
+  `tests/unit/analysis/CMakeLists.txt`; корневой `CMakeLists.txt` её не собирает.
+
+Интеграция — задача участника 4: подключить `cipher` и `mode` в `src/CMakeLists.txt`, вызвать
+обе функции регистрации в `src/core/registry.cpp`, убрать прямое подключение исходников из
+тестовых `CMakeLists.txt` и перенести сборку `pq_analysis` в корневой CMake для `pqanalyze`.
+
+### Векторы
+- AES: 12 файлов ECB из архива CAVP `KAT_AES.zip` (`tests/kat/aes/`); тесты проверяют и
+  шифрование, и расшифрование каждой записи. Промежуточные значения — из FIPS 197-upd1,
+  приложения A.1–A.3 и B.
+- GCM: 6 файлов CAVP из `gcmtestvectors.zip` (`tests/kat/gcm/`). Тесты выполняют все записи
+  профиля «nonce 96 бит, тег 128 бит», включая `FAIL`; остальные профили отфильтровываются.
+  Промежуточные значения GHASH — из официальных примеров NIST `AES_GCM.pdf`.
+- ECB/CBC/CTR: приложение F SP 800-38A (`tests/kat/modes/`). CBC всегда добавляет паддинг,
+  поэтому четыре официальных блока сверяются как префикс, а дополнительный блок проверяется
+  отдельно.
+- «Кузнечик»: контрольные примеры ГОСТ Р 34.12-2015 читаются из неизменённого RFC 7801
+  (`tests/kat/kuznyechik/rfc7801.txt`), который их воспроизводит. PDF ГОСТ в репозиторий не
+  включён. Опечатки в формулах RFC описаны в `src/cipher/kuznyechik.md`.
+- SP 800-38A и `AES_GCM.pdf` хранятся как полный вывод `pdftotext -layout`; SHA-256 и PDF, и
+  текста записаны в README каталогов.
+
+### Тесты
+- Тесты лежат в `tests/unit/cipher/`, `tests/unit/mode/` и `tests/unit/analysis/`, отдельные
+  группы: `ctest --preset debug -R 'Aes|Kuznyechik|Gcm|Ghash|Mode|Padding|Avalanche|Sbox|RealCipher'`.
+- Новые хелперы в `tests/support/`: `participant3_registry.hpp` — локальный `Registry` с
+  настоящими шифрами и режимами; `secret_fixture.hpp` — hex → `SecureBytes`, только для
+  опубликованных векторов.
+- `tests/unit/mode/hybrid_real_test.cpp` прогоняет `KemDem` (`seal`, `open`, `rewrap`, подмена)
+  для каждого ML-KEM × каждого шифра через `participant3_registry()`, к которому добавлены KEM
+  из `Registry::global()`.
