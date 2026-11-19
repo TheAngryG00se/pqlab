@@ -750,3 +750,15 @@ cmake --build --preset debug --target tidy          # clang-tidy
   опубликованных векторов.
 - `tests/unit/mode/hybrid_real_test.cpp` прогоняет `KemDem` (`seal`, `open`, `rewrap`, подмена)
   для каждого ML-KEM × каждого шифра через `Registry::global()`.
+
+## 18. Эталонный эксперимент HQC
+
+- `python3 scripts/run_hqc_avalanche.py` запускает отдельную сборку эталона в
+  `tests/diff/hqc_avalanche/`. Версия спецификации, коммит и SHA-256 официальных векторов
+  зафиксированы в `src/kem/hqc/README.md`. Штатные сборки `pqlab` и реестр от эталона
+  не зависят.
+- Опубликованные данные для HQC-1/3/5 лежат в `results/final/hqc-avalanche/`.
+  `python3 scripts/plot_hqc_avalanche.py results/final/hqc-avalanche/summary.csv`
+  строит график по сводной таблице.
+- Методика и выводы для защиты приведены в `docs/hqc_avalanche.md` и
+  `docs/kem_attack_assessment.md`.
