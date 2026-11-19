@@ -70,19 +70,10 @@ Line parse_line(std::string_view text) {
   return l;
 }
 
-std::vector<std::string> split_lines(const std::string& text) {
-  std::vector<std::string> lines;
-  std::istringstream in(text);
-  std::string line;
-  while (std::getline(in, line)) {
-    lines.push_back(line);
+void require_valid(const AuditVerdict& verdict) {
+  if (!verdict.ok) {
+    throw Error("audit log at line " + std::to_string(verdict.bad_line) + ": " + verdict.problem);
   }
-  return lines;
-}
-
-bool file_exists(const std::filesystem::path& p) {
-  std::error_code ec;
-  return std::filesystem::exists(p, ec);
 }
 
 }  // namespace
@@ -103,14 +94,9 @@ void AuditLog::append(int64_t time, std::string_view event, std::string_view key
   e.detail = std::string(detail);
 
   Mac prev{};
-  if (file_exists(file_)) {
-    const std::vector<std::string> lines = split_lines(fs::read_file(file_));
-    if (!lines.empty()) {
-      const Line last = parse_line(lines.back());
-      e.seq = last.entry.seq + 1;
-      prev = last.mac;
-    }
-  }
+  const AuditVerdict verdict = inspect(nullptr, prev);
+  require_valid(verdict);
+  e.seq = verdict.entries;
   const Mac mac = chain_mac(key_, prev, e);
 
   Json j;
@@ -125,23 +111,25 @@ void AuditLog::append(int64_t time, std::string_view event, std::string_view key
 
 std::vector<AuditEntry> AuditLog::read() const {
   std::vector<AuditEntry> out;
-  if (!file_exists(file_)) {
-    return out;
-  }
-  for (const std::string& line : split_lines(fs::read_file(file_))) {
-    out.push_back(parse_line(line).entry);
-  }
+  Mac last{};
+  require_valid(inspect(&out, last));
   return out;
 }
 
 AuditVerdict AuditLog::verify() const {
+  Mac last{};
+  return inspect(nullptr, last);
+}
+
+AuditVerdict AuditLog::inspect(std::vector<AuditEntry>* entries, Mac& last_mac) const {
   AuditVerdict v;
-  if (!file_exists(file_)) {
+  if (!std::filesystem::exists(file_)) {
     return v;
   }
-  Mac prev{};
+  std::istringstream input(fs::read_file(file_));
+  std::string text;
   size_t n = 0;
-  for (const std::string& text : split_lines(fs::read_file(file_))) {
+  while (std::getline(input, text)) {
     ++n;
     auto reject = [&](const char* why) {
       v.ok = false;
@@ -149,6 +137,9 @@ AuditVerdict AuditLog::verify() const {
       v.problem = why;
       return v;
     };
+    if (input.eof()) {
+      return reject("incomplete final line");
+    }
     Line line;
     try {
       line = parse_line(text);
@@ -158,11 +149,14 @@ AuditVerdict AuditLog::verify() const {
     if (line.entry.seq != n - 1) {
       return reject("sequence number out of order");
     }
-    const Mac want = chain_mac(key_, prev, line.entry);
+    const Mac want = chain_mac(key_, last_mac, line.entry);
     if (!ct_equal(want, line.mac)) {
       return reject("chain mac mismatch");
     }
-    prev = line.mac;
+    last_mac = line.mac;
+    if (entries != nullptr) {
+      entries->push_back(std::move(line.entry));
+    }
     ++v.entries;
   }
   return v;

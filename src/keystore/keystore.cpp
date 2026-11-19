@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <memory>
 #include <optional>
+#include <set>
 #include <system_error>
 
 #include "hybrid/envelope.hpp"
@@ -20,6 +21,35 @@ namespace stdfs = std::filesystem;
 
 constexpr std::string_view kAuditKeyFile = "audit.key";
 constexpr std::string_view kAuditLogFile = "audit.log";
+
+// A version 1 store can have only audit.key left from its first, failed transaction.
+// Once it has records, both audit files belong to the committed state.
+void check_audit_files(const stdfs::path& dir) {
+  if (!stdfs::exists(dir)) {
+    return;
+  }
+  const stdfs::path key = dir / kAuditKeyFile;
+  const stdfs::path log = dir / kAuditLogFile;
+  if (stdfs::exists(key) && (!stdfs::is_regular_file(key) || stdfs::file_size(key) != 32)) {
+    throw Error("invalid keystore audit.key");
+  }
+  if (stdfs::exists(log)) {
+    if (!stdfs::is_regular_file(key) || !stdfs::is_regular_file(log) ||
+        stdfs::file_size(log) == 0) {
+      throw Error("incomplete keystore audit files");
+    }
+    return;
+  }
+  for (const auto& entry : stdfs::directory_iterator(dir)) {
+    if (entry.path().extension() == ".json") {
+      throw Error("key records exist without an audit log");
+    }
+  }
+}
+
+bool ends_active_status(std::string_view event) {
+  return event == "key_retired" || event == "key_revoked" || event == "key_destroyed";
+}
 
 stdfs::path record_path(const stdfs::path& dir, const KeyId& id) {
   return dir / (key_id_hex(id) + ".json");
@@ -178,6 +208,7 @@ std::unique_ptr<Aead> Keystore::make_aead_for(const KeyRecord& rec) const {
 fs::FileLock Keystore::acquire() const {
   fs::FileLock lock(home_ / "keystore.lock");
   fs::recover_dir(dir_);
+  check_audit_files(dir_);
   return lock;
 }
 
@@ -194,14 +225,7 @@ void Keystore::transact(const Mutation& mutation) {
   const fs::FileLock lock = acquire();
   fs::make_private_dir(dir_);
 
-  const stdfs::path key_file = dir_ / kAuditKeyFile;
   std::error_code ec;
-  if (!stdfs::exists(key_file, ec)) {
-    SecureBytes k(32);
-    rng_.fill(k.span());
-    fs::write_file_atomic(key_file, as_chars(k));
-  }
-
   const stdfs::path stage = home_ / "keystore.stage";
   stdfs::remove_all(stage, ec);  // left over from a crashed run
   fs::make_private_dir(stage);
@@ -213,6 +237,12 @@ void Keystore::transact(const Mutation& mutation) {
         stdfs::permissions(copy, stdfs::perms::owner_read | stdfs::perms::owner_write,
                            stdfs::perm_options::replace);
       }
+    }
+    const stdfs::path key_file = stage / kAuditKeyFile;
+    if (!stdfs::exists(key_file)) {
+      SecureBytes k(32);
+      rng_.fill(k.span());
+      fs::write_file_atomic(key_file, as_chars(k));
     }
     mutation(stage);
     for (const auto& entry : stdfs::directory_iterator(stage)) {
@@ -317,13 +347,31 @@ KeyId Keystore::resolve(std::string_view id_or_prefix) const {
 }
 
 std::optional<KeyRecord> Keystore::active_key(std::string_view kem) const {
-  std::optional<KeyRecord> best;
-  for (KeyRecord& rec : list()) {
-    if (can_encrypt(rec.status) && rec.kem == kem) {
-      best = std::move(rec);  // list() is ordered oldest first
+  if (!stdfs::exists(home_)) {
+    return std::nullopt;
+  }
+  const fs::FileLock lock = acquire();
+  if (!stdfs::exists(dir_ / kAuditLogFile)) {
+    return std::nullopt;
+  }
+
+  // Creation is the only transition to active. Walk the authenticated history newest first.
+  const std::vector<AuditEntry> entries = open_audit(dir_).read();
+  const std::string kem_prefix = "kem=" + std::string(kem) + " kdf_iterations=";
+  std::set<std::string> inactive;
+  for (auto it = entries.rbegin(); it != entries.rend(); ++it) {
+    if (ends_active_status(it->event)) {
+      inactive.insert(it->key_id);
+    } else if (it->event == "key_created" && it->detail.starts_with(kem_prefix) &&
+               !inactive.contains(it->key_id)) {
+      KeyRecord rec = load_record(dir_, parse_key_id(it->key_id));
+      if (!can_encrypt(rec.status) || rec.kem != kem) {
+        throw Error("key record disagrees with its audited status or KEM");
+      }
+      return rec;
     }
   }
-  return best;
+  return std::nullopt;
 }
 
 UnlockedKey Keystore::unlock(const KeyId& id, ByteView password) {
@@ -441,13 +489,15 @@ std::vector<KeyId> Keystore::rotation_due() const {
 }
 
 void Keystore::record_event(std::string_view event, const KeyId& id, std::string_view detail) {
-  std::error_code ec;
-  if (!stdfs::exists(home_, ec)) {
-    return;
+  if (event == "key_created" || ends_active_status(event)) {
+    throw Error("key lifecycle events must be written by a keystore transaction");
+  }
+  if (!stdfs::exists(home_)) {
+    throw Error("no keystore audit log for event");
   }
   const fs::FileLock lock = acquire();
-  if (!stdfs::exists(dir_ / kAuditKeyFile, ec)) {
-    return;  // nothing has ever been created here, so there is no log to extend
+  if (!stdfs::exists(dir_ / kAuditLogFile)) {
+    throw Error("no keystore audit log for event");
   }
   const bool no_key = id == KeyId{};
   open_audit(dir_).append(now(), event, no_key ? std::string() : key_id_hex(id), detail);
@@ -459,22 +509,27 @@ std::vector<AuditEntry> Keystore::audit_entries() const {
     return {};
   }
   const fs::FileLock lock = acquire();
-  if (!stdfs::exists(dir_ / kAuditKeyFile, ec)) {
+  if (!stdfs::exists(dir_ / kAuditLogFile)) {
     return {};
   }
   return open_audit(dir_).read();
 }
 
 AuditVerdict Keystore::verify_audit() const {
-  std::error_code ec;
-  if (!stdfs::exists(home_, ec)) {
-    return {};
+  try {
+    if (!stdfs::exists(home_)) {
+      return {};
+    }
+    const fs::FileLock lock = acquire();
+    if (!stdfs::exists(dir_ / kAuditLogFile)) {
+      return {};
+    }
+    return open_audit(dir_).verify();
+  } catch (const Error& e) {
+    return {false, 0, 0, e.what()};
+  } catch (const stdfs::filesystem_error& e) {
+    return {false, 0, 0, e.what()};
   }
-  const fs::FileLock lock = acquire();
-  if (!stdfs::exists(dir_ / kAuditKeyFile, ec)) {
-    return {};
-  }
-  return open_audit(dir_).verify();
 }
 
 }  // namespace pq::keystore

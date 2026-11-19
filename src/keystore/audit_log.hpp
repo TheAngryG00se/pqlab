@@ -9,6 +9,7 @@
 // (nothing later refers to them) and anything done by someone who can read audit_key.
 // Entries never contain secrets: only event names, key ids and short fixed descriptions.
 
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <string>
@@ -40,17 +41,18 @@ class AuditLog {
   AuditLog(std::filesystem::path file, ByteView audit_key);
 
   // Appends one entry; seq and the chain value continue from the current last line.
-  // Throws pq::Error if the last line cannot be parsed.
+  // Refuses to extend a broken chain.
   void append(int64_t time, std::string_view event, std::string_view key_id,
               std::string_view detail);
 
-  // Entries in file order, without checking the chain. Throws pq::Error on a line that
-  // does not parse.
+  // Returns entries in file order after authenticating the complete chain.
   [[nodiscard]] std::vector<AuditEntry> read() const;
 
   [[nodiscard]] AuditVerdict verify() const;
 
  private:
+  [[nodiscard]] AuditVerdict inspect(std::vector<AuditEntry>* entries,
+                                     std::array<uint8_t, 32>& last_mac) const;
   std::filesystem::path file_;
   SecureBytes key_;
 };

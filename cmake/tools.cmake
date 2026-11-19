@@ -13,7 +13,7 @@ if(CLANG_FORMAT_EXE)
     COMMAND ${CLANG_FORMAT_EXE} --dry-run --Werror ${PQ_FORMAT_SOURCES})
 endif()
 
-find_program(CLANG_TIDY_EXE clang-tidy)
+find_program(CLANG_TIDY_EXE NAMES clang-tidy-18 clang-tidy)
 if(CLANG_TIDY_EXE)
   file(GLOB_RECURSE PQ_TIDY_SOURCES CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/src/*.cpp)
   add_custom_target(tidy

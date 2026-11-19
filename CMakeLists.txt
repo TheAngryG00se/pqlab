@@ -1,5 +1,3 @@
-# Zone: participant 4. Minimal skeleton written by participant 1 so that the
-# core and hash layers can be built and tested; to be extended by participant 4.
 cmake_minimum_required(VERSION 3.24)
 
 project(pqlab LANGUAGES CXX)
@@ -35,6 +33,10 @@ target_include_directories(pqlab
 target_link_libraries(pqlab PRIVATE pq_warnings nlohmann_json::nlohmann_json)
 
 add_subdirectory(src)
+add_subdirectory(analysis/avalanche)
+add_subdirectory(analysis/sbox)
+add_subdirectory(apps/pqanalyze)
+add_subdirectory(apps/pqtool)
 
 if(PQ_BUILD_BENCH)
   add_subdirectory(bench)

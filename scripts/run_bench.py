@@ -144,7 +144,7 @@ def execute(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", type=Path, default=ROOT / "build/release/apps/pqbench/pqbench")
-    parser.add_argument("--suite", choices=("all", "kem", "cipher", "aead", "hybrid"), default="all")
+    parser.add_argument("--suite", choices=("all", "kem", "cipher", "mode", "aead", "hybrid"), default="all")
     parser.add_argument("--filter", default="")
     parser.add_argument("--iterations", type=int, default=10000)
     parser.add_argument("--seconds", type=float, default=1)

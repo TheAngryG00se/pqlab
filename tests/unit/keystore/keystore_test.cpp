@@ -452,6 +452,66 @@ TEST_F(KeystoreTest, TamperedAuditLogIsReported) {
   const AuditVerdict v = ks.verify_audit();
   EXPECT_FALSE(v.ok);
   EXPECT_EQ(v.bad_line, 1U);
+  EXPECT_THROW((void)ks.active_key("Dummy-KEM"), pq::Error);
+  EXPECT_THROW((void)ks.unlock(id, kPw), pq::Error);
+  EXPECT_THROW((void)ks.create_key("Dummy-KEM", "other", kPw), pq::Error);
+}
+
+TEST_F(KeystoreTest, MissingAuditFilesInCommittedStoreRefuseUseAndStayMissing) {
+  Keystore ks = make();
+  const KeyId id = ks.create_key("Dummy-KEM", "a", kPw);
+  const auto key = ks_dir() / "audit.key";
+  const auto log = ks_dir() / "audit.log";
+  const auto saved_log = fs::read_file(log);
+  const auto saved_key = home_.path() / "backup.key";
+  for (const auto& missing : {"key", "log", "both", "empty log"}) {
+    const std::string_view scenario(missing);
+    SCOPED_TRACE(scenario);
+    if (scenario == "key" || scenario == "both") {
+      stdfs::rename(key, saved_key);
+    }
+    if (scenario == "log" || scenario == "both") {
+      stdfs::remove(log);
+    } else if (scenario == "empty log") {
+      fs::write_file_atomic(log, "");
+    }
+    const bool had_key = stdfs::exists(key);
+    const bool had_log = stdfs::exists(log);
+    const auto record = fs::read_file(file_of(id));
+    const auto verdict = ks.verify_audit();
+    EXPECT_FALSE(verdict.ok);
+    EXPECT_FALSE(verdict.problem.empty());
+    EXPECT_THROW((void)ks.active_key("Dummy-KEM"), pq::Error);
+    EXPECT_THROW((void)ks.unlock(id, kPw), pq::Error);
+    EXPECT_THROW(ks.record_event("test", id, ""), pq::Error);
+    EXPECT_THROW((void)ks.create_key("Dummy-KEM", "other", kPw), pq::Error);
+    EXPECT_EQ(stdfs::exists(key), had_key);
+    EXPECT_EQ(stdfs::exists(log), had_log);
+    if (had_log) {
+      EXPECT_EQ(fs::read_file(log), scenario == "empty log" ? "" : saved_log);
+    }
+    EXPECT_EQ(fs::read_file(file_of(id)), record);
+    if (stdfs::exists(saved_key)) {
+      stdfs::rename(saved_key, key);
+    }
+    fs::write_file_atomic(log, saved_log);
+  }
+  EXPECT_TRUE(ks.verify_audit().ok);
+  EXPECT_EQ(ks.active_key("Dummy-KEM")->key_id, id);
+}
+
+TEST_F(KeystoreTest, FirstTransactionCanResumeAnEmptyVersionOneStore) {
+  Keystore ks = make();
+  fs::make_private_dir(ks_dir());
+  const auto key = ks_dir() / "audit.key";
+  // An earlier version initialized this file before the first transaction committed.
+  fs::write_file_atomic(key, "0123456789abcdef0123456789abcdef");
+  EXPECT_TRUE(ks.verify_audit().ok);
+  EXPECT_FALSE(ks.active_key("Dummy-KEM"));
+  const KeyId id = ks.create_key("Dummy-KEM", "a", kPw);
+  ASSERT_TRUE(ks.active_key("Dummy-KEM"));
+  EXPECT_EQ(ks.active_key("Dummy-KEM")->key_id, id);
+  EXPECT_EQ(ks.verify_audit().entries, 1U);
 }
 
 TEST_F(KeystoreTest, LeftoversOfACrashedRunAreIgnored) {

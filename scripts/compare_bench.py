@@ -257,7 +257,7 @@ def render_series(current, output_dir, baseline=None, label="current", baseline_
         fig.suptitle("KEM: медианы независимых запусков и диапазон min–max", fontweight="bold")
         save(fig, "kem_repeated_latency")
 
-    for primitive in ("cipher", "AEAD", "hybrid"):
+    for primitive in ("cipher", "mode", "AEAD", "hybrid"):
         operations = sorted({key[2] for key in current.summary if key[0] == primitive})
         for op in operations:
             keys = [key for key in current.summary if key[0] == primitive and key[2] == op

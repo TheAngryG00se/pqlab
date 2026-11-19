@@ -31,6 +31,9 @@ Bytes rewrap_to_active(Keystore& ks, const hybrid::KemDem& kd, ByteView envelope
     throw Error("no active key for " + std::string(kem));
   }
   if (target->key_id == old_key.key_id) {
+    if (!kd.verify_header(old_key.sk, h)) {
+      throw Error("the envelope does not open with the key it names");
+    }
     return Bytes(envelope.begin(), envelope.end());
   }
   const std::optional<Bytes> moved = kd.rewrap(old_key.sk, target->kem, target->pk, envelope, rng);

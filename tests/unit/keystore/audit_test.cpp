@@ -169,6 +169,14 @@ TEST_F(AuditTest, GarbageLineIsDetected) {
   EXPECT_THROW(log.append(1, "e", "", ""), pq::Error);
 }
 
+TEST_F(AuditTest, PartialFinalLineCannotBeExtended) {
+  AuditLog log(file_, key_);
+  fill(log, 1);
+  fs::write_file_atomic(file_, lines().front());
+  EXPECT_FALSE(log.verify().ok);
+  EXPECT_THROW(log.append(2000, "later", "", ""), pq::Error);
+}
+
 TEST_F(AuditTest, WrongKeyFailsFromTheFirstLine) {
   AuditLog log(file_, key_);
   fill(log, 2);

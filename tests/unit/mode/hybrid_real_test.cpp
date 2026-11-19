@@ -3,15 +3,16 @@
 #include "hybrid/envelope.hpp"
 #include "hybrid/kem_dem.hpp"
 #include "pq/ct.hpp"
-#include "support/participant3_registry.hpp"
+#include "pq/registry.hpp"
 
 namespace {
 TEST(RealCipherHybrid, EveryAvailableKemAndCipherAuthenticatesAndRewraps) {
-  auto registry = pq::test::participant3_registry();
-  const auto& global = pq::Registry::global();
-  for (const auto& kem : global.list_kems()) {
-    registry.add_kem(kem, [kem] { return pq::Registry::global().kem(kem); });
-  }
+  const auto& registry = pq::Registry::global();
+  ASSERT_EQ(registry.list_ciphers(),
+            (std::vector<std::string>{"AES-128", "AES-192", "AES-256", "Kuznyechik"}));
+  ASSERT_EQ(registry.list_cipher_modes(), (std::vector<std::string>{"CBC", "CTR", "ECB"}));
+  ASSERT_EQ(registry.list_modes(), (std::vector<std::string>{"GCM"}));
+  ASSERT_FALSE(registry.list_kems().empty());
   pq::SystemRng rng;
   const pq::hybrid::KemDem hybrid(registry);
   for (const auto& kem_name : registry.list_kems()) {
@@ -44,8 +45,7 @@ TEST(RealCipherHybrid, EveryAvailableKemAndCipherAuthenticatesAndRewraps) {
 }
 
 TEST(RealCipherHybrid, AesGcmProtectsFullChunkBoundaries) {
-  auto registry = pq::test::participant3_registry();
-  registry.add_kem("ML-KEM-512", [] { return pq::Registry::global().kem("ML-KEM-512"); });
+  const auto& registry = pq::Registry::global();
   pq::SystemRng rng;
   const auto keys = registry.kem("ML-KEM-512")->keygen(rng);
   const pq::hybrid::KemDem hybrid(registry);

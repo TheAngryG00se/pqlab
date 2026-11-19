@@ -1,12 +1,26 @@
 #include <gtest/gtest.h>
 
 #include "analysis/avalanche/experiments.hpp"
+#include "analysis/avalanche/mlkem_keygen.hpp"
 #include "analysis/sbox/sbox.hpp"
 #include "cipher/aes_detail.hpp"
 #include "cipher/kuznyechik_detail.hpp"
 #include "support/participant3_registry.hpp"
 
 namespace {
+TEST(MlKemKeygenAvalanche, SeparatesBothSeedComponentsForEveryParameterSet) {
+  for (const auto* name : {"ML-KEM-512", "ML-KEM-768", "ML-KEM-1024"}) {
+    SCOPED_TRACE(name);
+    const auto kem = pq::Registry::global().kem(name);
+    constexpr uint32_t kPairs = 4;
+    const auto result = pq::analysis::mlkem_keygen_avalanche(*kem, kPairs);
+    EXPECT_GT(result[0].pk_bits, 0U);
+    EXPECT_GT(result[0].dk_bits, kPairs);
+    EXPECT_EQ(result[1].pk_bits, 0U);
+    EXPECT_EQ(result[1].dk_bits, kPairs);
+  }
+}
+
 TEST(RealCipherAnalysis, SboxStatisticsAndDirectDdtCounting) {
   // These are mathematical properties of the public substitution tables,
   // not replacement encryption KATs. Verify a DDT row by independent counting.

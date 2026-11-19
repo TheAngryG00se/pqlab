@@ -15,6 +15,7 @@ FIELDS = (
 OPS = {
     "KEM": {"keygen", "encaps", "decaps"},
     "cipher": {"set_key", "encrypt", "decrypt"},
+    "mode": {"encrypt", "decrypt"},
     "AEAD": {"seal", "open"},
     "hybrid": {"seal", "open"},
 }
@@ -162,7 +163,7 @@ def render(rows, output_dir, formats):
             fig.subplots_adjust(wspace=0.22)
             save(fig, "kem_cycles")
 
-    for primitive in ("cipher", "AEAD", "hybrid"):
+    for primitive in ("cipher", "mode", "AEAD", "hybrid"):
         for op in sorted(OPS[primitive] - {"set_key"}):
             data = [
                 r for r in rows

@@ -3,7 +3,9 @@
 #include <string>
 #include <utility>
 
+#include "cipher/register.hpp"
 #include "kem/mlkem/register.hpp"
+#include "mode/register.hpp"
 #include "pq/error.hpp"
 
 namespace pq {
@@ -43,12 +45,12 @@ std::vector<std::string> keys_of(const Map& map) {
 
 }  // namespace
 
-// Every module contributes through its own register_algorithms(). Block
-// ciphers and modes are added here when src/cipher and src/mode exist.
 Registry& Registry::global() {
   static Registry instance = [] {
     Registry r;
     mlkem::register_algorithms(r);
+    cipher::register_algorithms(r);
+    mode::register_algorithms(r);
     return r;
   }();
   return instance;

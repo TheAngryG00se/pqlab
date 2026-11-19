@@ -46,4 +46,3 @@ Verification:
 
 Known limitations:
 - The matrix A is regenerated on every operation (it is not cached).
-- `register.hpp` is not used until `pq::Registry` is implemented in `src/core`.

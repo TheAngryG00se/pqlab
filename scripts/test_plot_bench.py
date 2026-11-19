@@ -51,6 +51,13 @@ class PlotBenchTest(unittest.TestCase):
         names = ["ML-KEM-1024", "ML-KEM-512", "ML-KEM-768"]
         self.assertEqual(sorted(names, key=name_order), ["ML-KEM-512", "ML-KEM-768", "ML-KEM-1024"])
 
+    def test_mode_rows_use_plaintext_bytes_for_both_operations(self):
+        rows = self.read([
+            self.record(primitive="mode", param="AES-256-CBC", op=op, msg_bytes="17")
+            for op in ("encrypt", "decrypt")
+        ])
+        self.assertEqual([row["msg_bytes"] for row in rows], [17, 17])
+
 
 if __name__ == "__main__":
     unittest.main()

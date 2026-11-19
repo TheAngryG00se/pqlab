@@ -41,18 +41,16 @@ data:    chunk_0 | tag_0 | chunk_1 | tag_1 | ...        chunks of 64 KiB, the la
   throws `pq::Error`. Anything that fails authentication returns `std::nullopt`; this includes
   a wrong key, because ML-KEM Decaps rejects implicitly and the KEK simply comes out wrong.
 - `rewrap` = Decaps with the old key, unwrap the DEK, Encaps to the new key, new part B. Part A
-  and the data are copied byte for byte. It does not read or verify the data chunks, so it
-  costs the same for a 1 KB and a 10 GB file.
+  and the data are copied byte for byte. The cryptographic work depends on the KEM and key wrap.
+  Copying the payload takes time and output storage proportional to the envelope size.
+  The `open` operation verifies the payload tags.
 - Only `SecureBytes` holds secrets (K, KEK, DEK, plaintext); the AEAD key is never copied
   into a plain buffer.
 
 ## Known limitations
 
 - Buffer API only: the whole plaintext or envelope sits in memory. The chunked format allows a
-  streaming API later. `parse_header` already returns the header size, so a file-based rewrap
-  needs to rewrite only the first `Header::size` bytes.
+  streaming API later. Switching KEM can change the header length and the offset of the payload.
 - Only 12-byte nonces, 16-byte tags and keys up to 32 bytes are supported (checked at runtime).
 - The `kem_id`s of HQC are reserved but HQC is not in the registry yet; sealing to it throws
   `pq::Error: unknown KEM`.
-- Until `src/cipher` and `src/mode` register AES-GCM in `Registry::global()`, `KemDem` works
-  only with a registry that has it (the tests use `tests/support/stub_aead.hpp`).
