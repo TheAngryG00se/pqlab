@@ -1,6 +1,7 @@
 build/
 /results/*
 !/results/final/
+/output/pdf/pqlab.pdf
 compile_commands.json
 .cache/
 __pycache__/

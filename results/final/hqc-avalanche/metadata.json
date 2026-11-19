@@ -1,0 +1,40 @@
+{
+  "implementation": "official HQC portable C reference (ref)",
+  "upstream": "https://gitlab.com/pqc-hqc/hqc",
+  "tag": "v5.1.0",
+  "commit": "06567ccbad10580d78dd7863b15d23f41076d57f",
+  "specification_date": "2026-11-09",
+  "specification_url": "https://pqc-hqc.org/doc/hqc_specifications_v5.1.pdf",
+  "specification_sha256": "45be0bc16b6a44836a5f6d9f7bafbaf39e368d0bceac6aa1fea64d1320471b2f",
+  "archive_url": "https://gitlab.com/api/v4/projects/73349269/repository/archive.tar.gz?sha=06567ccbad10580d78dd7863b15d23f41076d57f",
+  "archive_sha256": "764316ff93c84acf9e71429b1af85a109a96d21692bb1271c392eead992a4996",
+  "reference_kats": {
+    "HQC-1": {
+      "cases_passed": 100,
+      "rsp_sha256": "c3f6ce304a00685e3aa356ef7cd81dbb35d985a1ff7123610bed9582e3638c1e"
+    },
+    "HQC-3": {
+      "cases_passed": 100,
+      "rsp_sha256": "7dcb2b670d1e108c0d7dc0c88b466c63c121de5ac4f96fd2e868c7040065a4ff"
+    },
+    "HQC-5": {
+      "cases_passed": 100,
+      "rsp_sha256": "e5066df4ec3dbe012d60a4a66ce5e0c2f1996d11af8a8eb66333f15b51095edb"
+    }
+  },
+  "samples_per_level_per_experiment": 768,
+  "inputs": "SHAKE256(ASCII('pqlab/hqc-avalanche/v1/HQC-{level}/{trial}')), split as seed_kem[32] || m[16/24/32] || salt[16]; trial is zero-based",
+  "flipped_bit": "trial modulo input_bits; bit zero is the LSB of the first byte",
+  "keygen_pair": "flip one seed_kem bit; observe serialized public key",
+  "encapsulation_pair": "flip one m bit, fix pk and salt within pair; observe serialized ciphertext including fixed salt, and shared secret",
+  "controls": "exact coin-request lengths; all KAT pk,sk,ct,ss; baseline replay on first trial of each level; one-bit input check; salt equality and Decaps on both ciphertexts of every experimental pair",
+  "method_sha256": {
+    "scripts/run_hqc_avalanche.py": "40054ae913df5c61a27ec80bf4e4ad52c91d88655a60f2d5e36cae573e66cdd1",
+    "tests/diff/hqc_avalanche/adapter.cpp": "67db79848b745382800eed8720b2c910c3c84d4232926e6066360ac602470260",
+    "tests/diff/hqc_avalanche/CMakeLists.txt": "a7675b57ed45cb809a19951512e4d5d16d9b0deb19ef2ba99952a8ae9a9e3ad8"
+  },
+  "output_sha256": {
+    "summary.csv": "90af2e9fdf9730725e2645a0dc4c306ac987328e40058f3f4caf38945379ab2e",
+    "trials.csv": "a28bef6e6ebd7252966b8f8de1d3ed7f4d132ab448f71ebc097d8892775027e9"
+  }
+}

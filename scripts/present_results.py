@@ -1,24 +1,30 @@
 #!/usr/bin/env python3
-"""Export the PQL1 diagram and measured ML-KEM results as a 16:9 PDF, PNGs and SVGs."""
+"""Build the pqlab presentation from ML-KEM and HQC experiments."""
 
 import argparse
 import csv
+import json
 import math
+import shutil
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
 from compare_bench import load_series
+from kem_assessment_figure import assessment_figure
+from plot_hqc_avalanche import hqc_avalanche_figure, read_distances
+from presentation_style import BLUE, FIGURE_STYLE, GRID, INK, MUTED, ORANGE, TEAL, number, slide, span
+from run_hqc_avalanche import COMMIT as HQC_COMMIT, KAT_SHA, sha256
 
 
 ROOT = Path(__file__).resolve().parents[1]
 KEMS = ("ML-KEM-512", "ML-KEM-768", "ML-KEM-1024")
 OPERATIONS = {"keygen": "Генерация ключей", "encaps": "Инкапсуляция", "decaps": "Декапсуляция"}
 ANALYSIS_FIELDS = "kem,component,output,samples,input_bits,output_bits,mean_changed_bits".split(",")
-INK, MUTED, GRID = "#142e3d", "#466371", "#d9e3e5"
-BLUE, TEAL, ORANGE = "#2866a9", "#007867", "#b6501b"
+LATEST_PDF = ROOT / "output/pdf/pqlab.pdf"
 
 
 @dataclass(frozen=True)
@@ -62,20 +68,31 @@ def read_avalanche(path):
     return observed
 
 
-def number(value, digits=1):
-    return f"{value:.{digits}f}".rstrip("0").rstrip(".").replace(".", ",") if digits else f"{value:.0f}"
+def read_hqc_run(directory):
+    metadata_path = directory / "metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    expected_kats = {f"HQC-{level}": {"cases_passed": 100, "rsp_sha256": checksum}
+                     for level, checksum in KAT_SHA.items()}
+    if (not isinstance(metadata, dict) or metadata.get("tag") != "v5.1.0"
+            or metadata.get("commit") != HQC_COMMIT or metadata.get("reference_kats") != expected_kats):
+        raise ValueError(f"{metadata_path}: ожидались HQC v5.1.0 и 300 подтверждённых KAT")
+    hashes = metadata.get("output_sha256")
+    for name in ("summary.csv", "trials.csv"):
+        path = directory / name
+        if not isinstance(hashes, dict) or sha256(path) != hashes.get(name):
+            raise ValueError(f"{path}: SHA-256 расходится с metadata.json")
+    rows = read_distances(directory / "summary.csv")
+    if any(row.samples != metadata.get("samples_per_level_per_experiment") for row in rows.values()):
+        raise ValueError(f"{metadata_path}: число пар расходится с summary.csv")
+    return rows
 
 
-def span(values):
-    low, high = min(values), max(values)
-    return (f"{low:,}" if low == high else f"{low:,}–{high:,}").replace(",", " ")
-
-
-def slide(plt, title, subtitle):
-    fig = plt.figure(figsize=(16, 9), facecolor="white")
-    fig.text(.055, .91, title, size=37, weight="bold", color=INK)
-    fig.text(.057, .849, subtitle, size=18, color=MUTED)
-    return fig
+def publish_pdf(source_pdf, destination_pdf):
+    destination_pdf.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=destination_pdf.parent) as tmp:
+        staged = Path(tmp) / destination_pdf.name
+        shutil.copyfile(source_pdf, staged)
+        staged.replace(destination_pdf)
 
 
 def horizontal_axis(ax, centers, labels, xlabel):
@@ -228,7 +245,7 @@ def envelope_figure(plt):
     return fig
 
 
-def render(bench_paths, avalanche_path, output):
+def render(bench_paths, avalanche_path, output, hqc_rows):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -238,8 +255,10 @@ def render(bench_paths, avalanche_path, output):
     changes = read_avalanche(avalanche_path)
     figures = (("pql1_rotation", envelope_figure, ()),
                ("mlkem_latency", latency_figure, (series,)),
-               ("mlkem_avalanche", avalanche_figure, (changes,)))
-    style = {"font.family": "DejaVu Sans", "axes.unicode_minus": False, "pdf.fonttype": 42}
+               ("mlkem_avalanche", avalanche_figure, (changes,)),
+               ("hqc_avalanche", hqc_avalanche_figure, (hqc_rows,)),
+               ("kem_attack_assessment", assessment_figure, ()))
+    style = {**FIGURE_STYLE, "pdf.fonttype": 42}
     with plt.rc_context(style), PdfPages(output / "pqlab.pdf", metadata={"Title": "Стенд pqlab"}) as pdf:
         for name, draw, inputs in figures:
             fig = draw(plt, *inputs)
@@ -252,9 +271,10 @@ def render(bench_paths, avalanche_path, output):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Графики ML-KEM и схема PQL1 для презентации (PDF, PNG 1920×1080 и SVG).")
+    parser = argparse.ArgumentParser(description="Презентация PQL1, экспериментов ML-KEM и HQC и оценки атак (PDF, PNG, SVG).")
     parser.add_argument("--bench-csv", type=Path, nargs="+", help="один или несколько CSV pqbench")
     parser.add_argument("--analysis-csv", type=Path, help="CSV эксперимента d/z из pqanalyze")
+    parser.add_argument("--hqc-dir", type=Path, help="каталог готового опыта HQC с CSV и metadata.json")
     parser.add_argument("--output-dir", type=Path, help="новый каталог для результатов")
     args = parser.parse_args()
     if bool(args.bench_csv) != bool(args.analysis_csv):
@@ -264,6 +284,19 @@ def main():
     try:
         output.mkdir(exist_ok=False, parents=True)
         bench_paths, avalanche_path = args.bench_csv, args.analysis_csv
+        hqc_dir = args.hqc_dir
+        if hqc_dir is None:
+            standard_hqc = ROOT / "results/hqc-avalanche"
+            if standard_hqc.exists():
+                hqc_dir = standard_hqc
+            elif bench_paths:
+                hqc_dir = ROOT / "results/final/hqc-avalanche"
+            else:
+                hqc_dir = output.resolve() / "hqc"
+                subprocess.run([sys.executable, ROOT / "scripts/run_hqc_avalanche.py",
+                                "--output-dir", hqc_dir], cwd=ROOT, check=True)
+        hqc_rows = read_hqc_run(hqc_dir)
+        print(f"HQC: {hqc_dir.resolve()}", flush=True)
         if not bench_paths:
             subprocess.run(["cmake", "--preset", "release"], cwd=ROOT, check=True)
             subprocess.run(["cmake", "--build", "--preset", "release", "--target", "pqbench", "pqanalyze",
@@ -276,7 +309,10 @@ def main():
             bench_paths = sorted(series_dir.glob("run-*.csv"))
             subprocess.run([apps / "pqanalyze/pqanalyze", "--samples", "256", "--output", avalanche_path],
                            check=True)
-        render(bench_paths, avalanche_path, output)
+        render(bench_paths, avalanche_path, output, hqc_rows)
+        if args.output_dir is None:
+            publish_pdf(output / "pqlab.pdf", LATEST_PDF)
+            print(LATEST_PDF)
     except (ValueError, OSError, subprocess.CalledProcessError) as error:
         parser.exit(1, f"present_results: {error}\n")
     print(output.resolve())
