@@ -762,3 +762,7 @@ cmake --build --preset debug --target tidy          # clang-tidy
   строит график по сводной таблице.
 - Методика и выводы для защиты приведены в `docs/hqc_avalanche.md` и
   `docs/kem_attack_assessment.md`.
+- Общая презентация собирается командой `python3 scripts/present_results.py`. После
+  успешного запуска общий PDF обновляется по пути `output/pdf/pqlab.pdf`. Отдельный прогон
+  можно выбрать через `--hqc-dir`. Порядок выбора данных и режимы экспорта описаны
+  в `docs/benchmarking.md`.

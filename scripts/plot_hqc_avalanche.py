@@ -7,7 +7,7 @@ import math
 from dataclasses import dataclass
 from pathlib import Path
 
-from present_results import BLUE, GRID, INK, MUTED, ORANGE, TEAL, number, slide, span
+from presentation_style import BLUE, FIGURE_STYLE, GRID, INK, MUTED, ORANGE, TEAL, number, slide, span
 
 
 COLUMNS = ("kem,component,output,samples,input_bits,output_bits,mean_changed_bits,"
@@ -69,10 +69,8 @@ def read_distances(path):
     return rows
 
 
-def render(rows, output_dir, extension):
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
+def hqc_avalanche_figure(plt, rows):
+    """Build an HQC figure from validated summary rows; the caller owns the figure."""
     from matplotlib.ticker import FuncFormatter, MaxNLocator
 
     shares = [d.percent(d.mean) for d in rows.values()]
@@ -81,8 +79,7 @@ def render(rows, output_dir, extension):
     high = max(50, *(d.percent(max(d.maximum, d.mean + d.sd)) for d in rows.values()))
     pad = max(1, .09 * (high - low))
     limits = (max(0, low - pad), min(100, high + pad))
-    with plt.rc_context({"font.family": "DejaVu Sans", "axes.unicode_minus": False,
-                         "svg.hashsalt": "pqlab-hqc-avalanche"}):
+    with plt.rc_context(FIGURE_STYLE):
         fig = slide(plt, "Лавинный эффект в HQC",
                     f"При изменении одного входного бита средняя доля изменившихся битов "
                     f"составила {number(min(shares), 2)}–{number(max(shares), 2)} %.")
@@ -121,6 +118,16 @@ def render(rows, output_dir, extension):
         count = span([d.samples for d in rows.values()])
         fig.text(.057, .061, f"HQC v5.1.0 · эталонная реализация · Пар на комбинацию — {count}. "
                  "Соль фиксирована внутри пары и входит в длину шифротекста.", fontsize=12, color=MUTED)
+    return fig
+
+
+def render(rows, output_dir, extension):
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    with plt.rc_context({"svg.hashsalt": "pqlab-hqc-avalanche"}):
+        fig = hqc_avalanche_figure(plt, rows)
         try:
             output_dir.mkdir(parents=True, exist_ok=True)
             path = output_dir / f"hqc_avalanche.{extension}"

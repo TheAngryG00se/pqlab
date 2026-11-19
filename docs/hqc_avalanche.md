@@ -82,3 +82,7 @@ cmp results/final/hqc-avalanche/trials.csv results/hqc-repeat/trials.csv
 Для работы без сети передайте первому скрипту `--archive /путь/к/архиву.tar.gz`.
 Готовый график можно в любой момент восстановить по опубликованным данным командой
 `python3 scripts/plot_hqc_avalanche.py results/final/hqc-avalanche/summary.csv`.
+
+Чтобы включить только что выполненный опыт в общую презентацию, запустите
+`python3 scripts/present_results.py --hqc-dir results/hqc-repeat`. Путь к обновлённому
+файлу — `output/pdf/pqlab.pdf`. [Сборка презентации](benchmarking.md)
