@@ -24,7 +24,7 @@ uint64_t integer(std::string_view value) {
 }
 
 void help() {
-  std::cout << "pqbench --suite all|kem|cipher|aead|hybrid [--filter NAME]\n"
+  std::cout << "pqbench --suite all|kem|cipher|mode|aead|hybrid [--filter NAME]\n"
                "        [--iterations N>=10000] [--seconds N>=1] [--warmup N]\n"
                "        [--sizes 16,256,4096,65536,1048576] [--output FILE.csv]\n"
                "pqbench --list\n\n"
@@ -93,7 +93,7 @@ int main(int argc, char** argv) {
       }
     }
     if (options.suite != "all" && options.suite != "kem" && options.suite != "cipher" &&
-        options.suite != "aead" && options.suite != "hybrid") {
+        options.suite != "mode" && options.suite != "aead" && options.suite != "hybrid") {
       throw pq::Error("unknown benchmark suite");
     }
     if (options.kem_iterations < 10000 || !std::isfinite(options.seconds) || options.seconds < 1 ||
@@ -111,6 +111,9 @@ int main(int argc, char** argv) {
       }
       for (const auto& name : registry.list_ciphers()) {
         std::cout << "cipher " << name << '\n';
+        for (const auto& mode : registry.list_cipher_modes()) {
+          std::cout << "mode   " << name << '-' << mode << '\n';
+        }
         for (const auto& mode : registry.list_modes()) {
           std::cout << "AEAD   " << name << '-' << mode << '\n';
         }
@@ -121,7 +124,8 @@ int main(int argc, char** argv) {
       throw pq::Error("measurements require cmake --preset release and its Release build");
     }
     if (registry.list_ciphers().empty()) {
-      std::cerr << "No block ciphers registered; cipher, AEAD and hybrid suites unavailable.\n";
+      std::cerr
+          << "No block ciphers registered; cipher, mode, AEAD and hybrid suites unavailable.\n";
     }
     const auto metadata = pq::bench::collect_metadata();
     if (output.empty()) {

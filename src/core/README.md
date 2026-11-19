@@ -14,8 +14,7 @@ Owner: participant 4. Namespace `pq`. Interfaces live in `include/pq/`.
 ## Registry
 
 - `Registry::global()` is built on first use by calling each module's `register_algorithms()`.
-  Today that is ML-KEM only. When `src/cipher`, `src/mode` and `src/kem/hqc` land, their
-  `register_algorithms()` must be added to `Registry::global()` in `registry.cpp`.
+  It registers ML-KEM, AES, Kuznyechik, GCM and the ECB/CBC/CTR cipher modes.
 - Duplicate names and empty factories throw `pq::Error`; so do unknown names.
 - `aead(mode, cipher)` builds `mode` around a fresh `cipher` instance, so
   `aead("GCM", "AES-256")->name() == "AES-256-GCM"`.

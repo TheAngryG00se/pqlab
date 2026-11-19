@@ -30,11 +30,12 @@ MeasureOptions bulk_options(const RunOptions& options, size_t bytes) {
   return out;
 }
 
-void advance_nonce(Bytes& nonce, uint64_t& counter) {
-  if (nonce.size() < 8 || counter == std::numeric_limits<uint64_t>::max()) {
+void advance_nonce(Bytes& nonce, uint64_t& counter, uint64_t stride = 1) {
+  if (nonce.size() < 8 || counter > std::numeric_limits<uint64_t>::max() - stride) {
     throw Error("benchmark: nonce too short or nonce counter exhausted");
   }
-  store64_be(nonce.data() + nonce.size() - 8, ++counter);
+  store64_be(nonce.data() + nonce.size() - 8, counter);
+  counter += stride;
 }
 
 }  // namespace
@@ -143,6 +144,54 @@ size_t run_benchmarks(const Registry& registry, const RunOptions& options,
                      cipher->decrypt_block(encrypted.data() + off, output.data() + off);
                    }
                    do_not_optimize(output);
+                 },
+                 timing));
+      }
+    }
+
+    for (const auto& mode : registry.list_cipher_modes()) {
+      const std::string full_name = name + "-" + mode;
+      if (!selected(options, "mode", full_name)) {
+        continue;
+      }
+      const auto algorithm = registry.cipher_mode(mode, name);
+      SecureBytes key(algorithm->key_size());
+      rng.fill(key.span());
+      Bytes iv(algorithm->iv_size());
+      rng.fill(iv);
+      uint64_t counter = 0;
+      for (size_t bytes : options.sizes) {
+        if (bytes == 0 || algorithm->block_size() == 0) {
+          throw Error("benchmark: mode and message must have a positive block and message size");
+        }
+        SecureBytes input(bytes);
+        rng.fill(input.span());
+        const auto encrypt = [&] {
+          if (mode == "CTR") {
+            // Reserve every counter block consumed, including the final partial block.
+            advance_nonce(iv, counter, 1 + (bytes - 1) / algorithm->block_size());
+          } else if (!iv.empty()) {
+            rng.fill(iv);
+          }
+          return algorithm->encrypt(key, iv, input);
+        };
+        const auto timing = bulk_options(options, bytes);
+        emit("mode", full_name, "encrypt", bytes,
+             measure(
+                 [&] {
+                   const auto out = encrypt();
+                   do_not_optimize(out);
+                 },
+                 timing));
+        const auto ciphertext = encrypt();
+        emit("mode", full_name, "decrypt", bytes,
+             measure(
+                 [&] {
+                   const auto out = algorithm->decrypt(key, iv, ciphertext);
+                   if (!out) {
+                     throw Error("benchmark: mode rejected its own ciphertext");
+                   }
+                   do_not_optimize(*out);
                  },
                  timing));
       }

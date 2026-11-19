@@ -58,4 +58,29 @@ TEST(BenchSuites, MissingAlgorithmsProduceNoFakeMeasurements) {
             0U);
 }
 
+TEST(BenchSuites, MeasuresRegisteredModesInPlaintextBytes) {
+  const auto& registry = pq::Registry::global();
+  pq::bench::RunOptions options;
+  options.suite = "mode";
+  options.seconds = 0;
+  options.warmup = 1;
+  for (const auto& mode : registry.list_cipher_modes()) {
+    SCOPED_TRACE(mode);
+    options.filter = "AES-128-" + mode;
+    options.sizes = {mode == "ECB" ? 16U : 17U};
+    std::vector<pq::bench::Result> results;
+    const auto count = pq::bench::run_benchmarks(registry, options,
+                                                 [&](const auto& row) { results.push_back(row); });
+    ASSERT_EQ(count, 2U);
+    EXPECT_EQ(results[0].op, "encrypt");
+    EXPECT_EQ(results[1].op, "decrypt");
+    for (const auto& row : results) {
+      EXPECT_EQ(row.primitive, "mode");
+      EXPECT_EQ(row.param, options.filter);
+      EXPECT_EQ(row.msg_bytes, options.sizes.front());
+      EXPECT_GE(row.stats.iterations, 30U);
+    }
+  }
+}
+
 }  // namespace

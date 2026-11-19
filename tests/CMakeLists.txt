@@ -11,3 +11,8 @@ FetchContent_MakeAvailable(googletest)
 
 include(GoogleTest)
 add_subdirectory(unit)
+add_test(NAME Pqtool.Cli COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/cli/pqtool.sh $<TARGET_FILE:pqtool>)
+if(CMAKE_BUILD_TYPE STREQUAL "Release")
+  add_test(NAME Pqtool.FileLifecycle
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/cli/pqtool.sh $<TARGET_FILE:pqtool> full)
+endif()
