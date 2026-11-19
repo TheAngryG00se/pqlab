@@ -549,9 +549,7 @@ cmake --build --preset debug --target tidy          # clang-tidy
 - `secure_zero`, `SecureBytes` и `ct_*` реализованы прямо в заголовках `include/pq/`,
   а не в `src/core`.
 - `SystemRng`, `DeterministicRng` и `Registry` реализованы в `src/core` участником 2 (PR #1); поддерживает участник 4.
-  `Registry::global()` пока регистрирует только ML-KEM. У шифров и режимов функции
-  `register_algorithms()` уже есть, но в `src/core/registry.cpp` они ещё не вызываются
-  (раздел 17); HQC добавит свою туда же.
+  `Registry::global()` регистрирует ML-KEM-512/768/1024, четыре блочных шифра и четыре режима.
 - Режимы без аутентификации (ECB, CBC, CTR) реализуют `pq::CipherMode`
   (`include/pq/cipher_mode.hpp`): `encrypt(key, iv, pt) → Bytes`,
   `decrypt(key, iv, ct) → std::optional<SecureBytes>`, ключ и IV передаются при каждом вызове.
@@ -610,7 +608,7 @@ cmake --build --preset debug --target tidy          # clang-tidy
   AES-128/192/256-GCM = 1/2/3, Kuznyechik-GCM = 4. Тест замораживает эти значения.
 - API только над буферами в памяти; потоковый вариант и пакетный rewrap файлов относятся к `pqtool`.
 - Неверный ключ и любое изменение конверта дают `std::nullopt`, а неверная структура —
-  `pq::Error`. `KemDem::rewrap` не читает и не проверяет куски данных.
+  `pq::Error`. `KemDem::rewrap` проверяет упаковку DEK и копирует зашифрованные куски в выходной буфер. Теги данных проверяет `open`.
 
 ### Хранилище (`src/keystore/`)
 - Статус входит в AAD записи, поэтому `retire` и `revoke` перешифровывают seed и требуют
@@ -628,6 +626,7 @@ cmake --build --preset debug --target tidy          # clang-tidy
 - Ключ журнала аудита лежит в `keystore/audit.key` (0600). Цепочка HMAC ловит правки, удаление,
   вставку и перестановку строк, но не отрезание хвоста и не защищает от того, кто читает
   `audit.key`.
+- При выборе активного получателя хранилище сверяет запись с проверенной HMAC-цепочкой событий под одной блокировкой. Потеря ключа аудита или журнала в заполненном хранилище останавливает операции.
 - PBKDF2: 600000 итераций по умолчанию; меньше можно только с `allow_weak_kdf` (для тестов).
   Запись с числом итераций больше 100 000 000 отвергается. На debug-сборке 600000 итераций
   занимают около 10 с, на `-O2` около 1,5 с.
@@ -637,10 +636,8 @@ cmake --build --preset debug --target tidy          # clang-tidy
   (раньше только к тестам).
 - Заглушки для тестов в `tests/support/`: `DummyKem`, `XorCipher`, `StubGcm` (AEAD поверх
   блочного шифра, тег HMAC-SHA3-256), `test_registry.hpp` (локальный `Registry` с именами
-  `AES-256` и `GCM`), `temp_dir.hpp`. Настоящий AES-GCM есть (`src/mode/gcm`, раздел 17),
-  но в `Registry::global()` он пока не зарегистрирован, поэтому `KemDem` и `Keystore` по-прежнему
-  работают только с реестром, который передан явно. С настоящими шифрами `KemDem` проверяется
-  в `tests/unit/mode/hybrid_real_test.cpp` через `participant3_registry()`.
+  `AES-256` и `GCM`), `temp_dir.hpp`. Реальные шифры в системных тестах конверта и хранилища
+  берутся из глобального реестра.
 
 ---
 
@@ -658,7 +655,7 @@ cmake --build --preset debug --target tidy          # clang-tidy
 - Тесты движка находятся в `tests/unit/bench/` и включаются при `PQ_BUILD_BENCH=ON`.
 - `pqbench` находится в `build/<preset>/apps/pqbench/pqbench`. Замеры разрешены только
   в Release; `--help` и `--list` доступны в Debug. CLI не добавляет зависимостей.
-- Наборы замеров: `kem`, `cipher`, `aead`, `hybrid`, либо `all`; алгоритмы берутся
+- Наборы замеров: `kem`, `cipher`, `mode`, `aead`, `hybrid`, либо `all`; алгоритмы берутся
   через `Registry`, без подключения заголовков конкретных реализаций.
 - KEM: ≥10000 вызовов каждой операции, случайные seed/m подготовлены `SystemRng`
   до таймера. Шифры, AEAD и KEM-DEM: ≥1 с измеренного времени и ≥30 выборок.
@@ -666,10 +663,8 @@ cmake --build --preset debug --target tidy          # clang-tidy
 - Метаданные commit/compiler/flags фиксируются при конфигурации CMake; после изменения
   кода или коммита Release надо сконфигурировать заново. Рабочие изменения помечаются
   суффиксом `-dirty`.
-- Пока доступен только ML-KEM: AES, «Кузнечик» и режимы реализованы (раздел 17), но не
-  подключены к рабочей сборке и `Registry::global()`, поэтому наборы `cipher`, `aead` и
-  `hybrid` пусты. Заглушки используются исключительно в unit-тестах движка, в `pqbench` не
-  регистрируются. Набора замеров для `pq::CipherMode` (ECB/CBC/CTR) ещё нет.
+- `pqbench --list` перечисляет рабочие алгоритмы. Для ECB/CBC/CTR набор `mode` измеряет
+  шифрование и расшифрование. `msg_bytes` содержит исходную длину открытого текста.
 - `scripts/plot_bench.py` строит PNG/SVG (и PDF по опции) из CSV: сравнение времени
   операций KEM, p5/p95 в тактах TSC, скорость шифров/AEAD и время KEM-DEM от размера.
   Скрипт не смешивает разные запуски и не генерирует отсутствующие измерения.
@@ -721,21 +716,17 @@ cmake --build --preset debug --target tidy          # clang-tidy
 - Атаки участника 3 (Square на 4 раунда AES, CBC padding oracle) ещё не написаны,
   `analysis/attacks/` в репозитории нет.
 
-### Не подключено к рабочей сборке
-Участник 3 не менял файлы участника 4, поэтому код его зоны пока живёт только в тестах:
-- `src/CMakeLists.txt` не делает `add_subdirectory(cipher)` и `add_subdirectory(mode)`.
-  `tests/unit/cipher/CMakeLists.txt` и `tests/unit/mode/CMakeLists.txt` компилируют исходники
-  из `src/cipher/` и `src/mode/` прямо в `pq_unit_tests`.
-- `Registry::global()` не вызывает `cipher::register_algorithms` и `mode::register_algorithms`.
-  Поэтому `pqbench`, `KemDem` и `Keystore` в рабочих программах настоящих шифров не видят.
-- Библиотека `pq_analysis` (`analysis/avalanche` + `analysis/sbox`) создаётся только из
-  `tests/unit/analysis/CMakeLists.txt`; корневой `CMakeLists.txt` её не собирает.
+### Рабочая сборка
 
-Интеграция — задача участника 4: подключить `cipher` и `mode` в `src/CMakeLists.txt`, вызвать
-обе функции регистрации в `src/core/registry.cpp`, убрать прямое подключение исходников из
-тестовых `CMakeLists.txt` и перенести сборку `pq_analysis` в корневой CMake для `pqanalyze`.
+`src/CMakeLists.txt` добавляет `cipher` и `mode` в `pqlab`. Реестр создаёт реализации по имени.
+Корневой CMake собирает `pq_analysis`, `pqanalyze` и `pqtool` также при `PQ_BUILD_TESTS=OFF`.
+`pqtool --help` выводит команды для создания и ротации ключа, шифрования, расшифрования и
+переупаковки отдельного файла. `pqanalyze --samples 256` измеряет расстояния Хэмминга в
+ключах ML-KEM при инверсии бита в `d` и `z`. Команда `python3 scripts/present_results.py`
+строит графики для презентации по свежим CSV. См. `docs/benchmarking.md`.
 
 ### Векторы
+
 - AES: 12 файлов ECB из архива CAVP `KAT_AES.zip` (`tests/kat/aes/`); тесты проверяют и
   шифрование, и расшифрование каждой записи. Промежуточные значения — из FIPS 197-upd1,
   приложения A.1–A.3 и B.
@@ -758,5 +749,4 @@ cmake --build --preset debug --target tidy          # clang-tidy
   настоящими шифрами и режимами; `secret_fixture.hpp` — hex → `SecureBytes`, только для
   опубликованных векторов.
 - `tests/unit/mode/hybrid_real_test.cpp` прогоняет `KemDem` (`seal`, `open`, `rewrap`, подмена)
-  для каждого ML-KEM × каждого шифра через `participant3_registry()`, к которому добавлены KEM
-  из `Registry::global()`.
+  для каждого ML-KEM × каждого шифра через `Registry::global()`.
