@@ -17,6 +17,8 @@
 
 namespace pq::hybrid {
 
+struct Header;
+
 class KemDem {
  public:
   // Algorithms come from the registry only. The AEAD is always "<cipher>-GCM".
@@ -33,6 +35,9 @@ class KemDem {
   // rejects implicitly, so the KEK is wrong), modified header or data, a
   // reordered, truncated or extended chunk sequence.
   [[nodiscard]] std::optional<SecureBytes> open(ByteView sk, ByteView envelope) const;
+
+  // Authenticates a parsed header by unwrapping its DEK. Data chunks are checked by open().
+  [[nodiscard]] bool verify_header(ByteView sk, const Header& header) const;
 
   // New envelope for the new recipient; the data part is copied unchanged.
   // std::nullopt if old_sk does not unwrap the DEK. Does not check the data tags.

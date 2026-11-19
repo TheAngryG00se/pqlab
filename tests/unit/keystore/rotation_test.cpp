@@ -68,6 +68,26 @@ TEST_F(RotationTest, EncryptNeedsAnActiveKey) {
   EXPECT_THROW((void)encrypt_to_active(ks_, kd_, "ML-KEM-512", "AES-256", {}, rng_), pq::Error);
 }
 
+TEST_F(RotationTest, SelectionUsesAuditedLifecycleForEncryptionAndRewrap) {
+  (void)ks_.create_key("ML-KEM-512", "source", kPw);
+  const auto envelope = encrypt_to_active(ks_, kd_, "ML-KEM-512", "AES-256", {}, rng_);
+  const KeyId target = ks_.create_key("ML-KEM-768", "target", kPw);
+  const auto file = ks_.directory() / (key_id_hex(target) + ".json");
+  const auto original_record = fs::read_file(file);
+  ks_.retire(target, kPw);
+
+  // A stale, correctly sealed active record must not supersede the committed retirement.
+  fs::write_file_atomic(file, original_record);
+  EXPECT_FALSE(ks_.active_key("ML-KEM-768"));
+  EXPECT_THROW((void)encrypt_to_active(ks_, kd_, "ML-KEM-768", "AES-256", {}, rng_), pq::Error);
+  EXPECT_THROW((void)rewrap_to_active(ks_, kd_, envelope, kPw, "ML-KEM-768", rng_), pq::Error);
+  EXPECT_THROW(ks_.record_event("key_created", target, "kem=ML-KEM-768 kdf_iterations=4"),
+               pq::Error);
+  const KeyId replacement = ks_.create_key("ML-KEM-768", "replacement", kPw);
+  const auto moved = rewrap_to_active(ks_, kd_, envelope, kPw, "ML-KEM-768", rng_);
+  EXPECT_EQ(pq::hybrid::parse_header(moved).b.key_id, replacement);
+}
+
 TEST_F(RotationTest, DecryptRefusesAnEnvelopeOfAnUnknownKey) {
   const pq::Bytes env = [&] {
     const KeyId id = ks_.create_key("ML-KEM-512", "k", kPw);
@@ -125,6 +145,9 @@ TEST_F(RotationTest, RewrapIsANoOpForTheActiveKeyAndFailsWithoutOne) {
   const KeyId id = ks_.create_key("ML-KEM-512", "k", kPw);
   const pq::Bytes env = encrypt_to_active(ks_, kd_, "ML-KEM-512", "AES-256", text("x"), rng_);
   EXPECT_EQ(rewrap_to_active(ks_, kd_, env, kPw, "", rng_), env);
+  auto damaged = env;
+  damaged[pq::hybrid::parse_header(env).size - 1] ^= 1;
+  EXPECT_THROW((void)rewrap_to_active(ks_, kd_, damaged, kPw, "", rng_), pq::Error);
   EXPECT_THROW((void)rewrap_to_active(ks_, kd_, env, kPw, "ML-KEM-1024", rng_), pq::Error);
   EXPECT_THROW((void)rewrap_to_active(ks_, kd_, env, pq::Bytes{'x'}, "", rng_), PasswordError);
   ks_.retire(id, kPw);

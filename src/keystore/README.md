@@ -50,6 +50,14 @@ Only `active` keys encrypt. `active`, `retired` and `revoked` keys can still be 
 data can be moved off them; `destroyed` keys cannot. `revoked → destroyed` is an addition to the
 plan, so that a compromised key's ciphertext does not have to stay on disk forever.
 
+For encryption and rewrap, the keystore verifies the full audit chain under the directory lock.
+It selects the most recent `key_created` event for the requested KEM that has no subsequent
+retirement, revocation or destruction. It checks the selected record's public key against the
+audited key ID and checks its KEM and active status. A record with no creation event is ineligible.
+Creation order comes from the journal, including when two keys have the same creation timestamp.
+Selection takes a snapshot under the lock. An operation already using that public key can finish
+while another process rotates it.
+
 ## Atomicity
 
 Every writing operation copies the keystore directory to `<home>/keystore.stage` (files forced
@@ -77,13 +85,20 @@ key_id || detail)`. Events: `key_created`, `key_unlocked`, `unlock_failed`, `pas
 `key_retired`, `key_revoked`, `key_destroyed`, `key_rotated`, `password_changed`,
 `envelope_rewrapped`. Entries carry no secrets.
 
+Each append verifies the existing chain. Key lifecycle events are written by the transaction
+that changes the record. In a directory containing key records, a missing audit key or a
+missing or empty journal stops key use and changes. `verify_audit` reports the failure. Recovery
+requires the matching audit files from a trusted backup. A fresh store initializes the audit key
+in its first successful transaction. Version 1 stores with only an audit key left by an
+interrupted first transaction can also finish initialization.
+
 ## Known limitations
 
 - `audit.key` sits next to the log. The chain detects edits, deletions, insertions and
   reordering by anyone who cannot read that file. It does not detect removal of the last
   lines, and it does not stop an attacker with the same user id.
-- Status changes are authenticated by the seed's AAD only while a seed exists. A destroyed
-  record has no seed, so its metadata is not authenticated.
+- The seed's AAD authenticates the record metadata on unlock. After destruction, the audit
+  chain still records the lifecycle transition, while fields such as the label lack a seed tag.
 - `destroy` removes the ciphertext from the record, but the old blocks may stay on the device
   (copy-on-write file systems, SSD wear levelling, journals). Do not rely on it as a wipe.
 - Passwords are `ByteView`s; the caller is responsible for keeping them in `SecureBytes`.
@@ -97,7 +112,7 @@ key_id || detail)`. Events: `key_created`, `key_unlocked`, `unlock_failed`, `pas
 - New seals use `<cipher>-GCM` from the registry (`AES-256-GCM` by default); an existing record
   is opened with the AEAD it names, so changing the option does not lock old keys out. A
   re-seal (retire, revoke, change_password) moves a record to the configured AEAD.
-  Until `src/cipher` and `src/mode` register it in `Registry::global()`, the keystore works only
-  with a registry that has it; the tests use `tests/support/stub_aead.hpp`.
+  In applications, `Registry::global()` supplies AES-256-GCM. Unit tests can use a local
+  registry with `tests/support/stub_aead.hpp`.
 - Bulk rewrap of a directory of files (temporary directory, then `rename`) belongs to `pqtool`
   and is not implemented here.

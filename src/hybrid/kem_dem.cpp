@@ -155,6 +155,11 @@ std::optional<SecureBytes> KemDem::open(ByteView sk, ByteView envelope) const {
   return plaintext;
 }
 
+bool KemDem::verify_header(ByteView sk, const Header& header) const {
+  const std::unique_ptr<Aead> aead = make_aead(registry_, aead_name(header.a.aead_id));
+  return unwrap_dek(registry_, header, sk, *aead).has_value();
+}
+
 std::optional<Bytes> KemDem::rewrap(ByteView old_sk, std::string_view new_kem_name, ByteView new_pk,
                                     ByteView envelope, Rng& rng) const {
   const Header h = parse_header(envelope);
